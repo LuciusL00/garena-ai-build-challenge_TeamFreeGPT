@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+.vite/
+
+# environment / secrets — never commit these
+.env
+.env.*
+!.env.example
+*.key
+
+# organiser documents, not part of our submission
+docs/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.log
