@@ -7,18 +7,29 @@ touchscreen. Players differ in hand size, motor ability, grip, fatigue, reach an
 Input channels differ too — touch is fast but hard to reach, a gesture is slower but steadier,
 face movement works when both hands are occupied.
 
-This project is a **game-agnostic middleware layer** that:
+This project is a **game-agnostic middleware layer** that does two things.
 
-1. **Measures** how reliably an individual player uses each available input channel.
+### 1. It provides the input channels
+
+Touch controls and on-device hand gesture recognition, behind one uniform interface. **A game
+adopting the layer gets alternative controls without implementing any of them.** No camera
+pipeline to build, no model to integrate, no per-channel plumbing.
+
+The same `InputChannel` interface is designed to take further channels — face blendshapes,
+device tilt, sound. Those are designed, not delivered.
+
+### 2. It assigns them to actions, per player
+
+1. **Measures** how reliably this individual player uses each available channel.
 2. **Compares** those measurements against each game action's declared requirements.
-3. **Recommends** which action should move to which input channel.
+3. **Recommends** which action should move to which channel.
 4. **Explains** the recommendation in plain language.
 5. **Validates** whether the new configuration actually improved performance.
 
 > **Declared action requirements × measured input capabilities → assignment, with an explanation.**
 
-The layer does not know anything about any particular game. Games declare their actions and
-requirements; the layer handles measurement, recommendation and rebinding.
+The layer knows nothing about any particular game. Games declare their actions and requirements;
+the layer supplies the channels and handles measurement, recommendation and rebinding.
 
 ---
 
@@ -44,16 +55,23 @@ way only. That constraint is what makes the portability claim verifiable rather 
 What a game developer writes to adopt the layer:
 
 ```ts
+// Turn on the channels this game wants available.
+// Touch controls, gesture recognition and the camera pipeline all come from the layer.
+adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
+
+// Declare what each action needs. The layer works out the rest.
 adaptive.registerActions([
   { id: 'LASSO',  requirements: { spatial: true,  latencyCritical: false } },
   { id: 'RECALL', requirements: { spatial: false, latencyCritical: false } },
-  { id: 'ESCORT', requirements: { spatial: false, latencyCritical: false } },
+  { id: 'HOLD',   requirements: { spatial: false, latencyCritical: false } },
 ]);
 
 adaptive.on('RECALL', () => swarm.recall());
 ```
 
-Everything else — calibration, measurement, recommendation, rebinding — is handled by the layer.
+That is the entire integration. The game never touches a pointer event, a hand landmark or a
+camera stream — and calibration, measurement, recommendation and rebinding are all handled by
+the layer.
 
 ---
 

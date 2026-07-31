@@ -1,202 +1,208 @@
-# Adaptive Input Squad Survivor — Implementation Plan v5
+# Adaptive Input Layer — Implementation Plan v6
 
-**Garena AI Build Challenge — "Reimagine Digital Entertainment Experiences"**
+**Garena AI Build Challenge 2026**
 
-> Self-contained. Anyone reading this — team member, ChatGPT, Codex — has everything needed
-> without prior context. v5 rescopes around a three-track team and a solo setup phase.
+> The specification. For current progress, milestones and work split see [STATUS.md](STATUS.md).
+> v6 reflects the released case brief and the shift to a middleware product with Swarmfall as
+> demo host.
 
 ---
 
-## 0. Status and hard constraints
+## 0. Constraints
 
 | Item | Value |
 |---|---|
-| Plan date | **29 July 2026** |
-| Deadline | **9 August 2026** |
-| Days remaining | **12, inclusive** |
-| Setup phase | **29–31 July, single person**, while shortlist confirmation is pending |
-| Full team available from | **1 August** |
-| Team | 3 members, varying availability |
-| Toolchain | Node 22.20.0, npm 10.9.3, Vite, VS Code, Codex |
+| Plan date | 30 July 2026 |
+| Submission | **9 August 2026** — deck, source code, video |
+| Finalists announced | 13 August · Final presentations 23 August |
+| Team | 3 members, full team from 1 August |
+| Toolchain | Node 22, Vite, TypeScript, Phaser, MediaPipe |
 
-**The schedule is the binding constraint, not the ideas.** Everything below is scoped so work
-can stop at any tier boundary and still produce a coherent submission.
+### Judging weights
+
+| Criterion | Weight | What it rewards |
+|---|---|---|
+| **Problem–Solution Fit** | **40%** | Clarity of problem, user understanding, strength of solution, suitability of AI, **prioritisation of trade-offs** |
+| Build Quality | 30% | Functions end-to-end **in a live setting**, reliability, **genuine use of AI-driven behaviour**, soundness of integration |
+| Originality | 30% | Originality of insight, differentiation from existing products, uniqueness of execution |
+
+Two consequences. First, the largest criterion is judged mostly on the deck, not the code — the
+decision log in §2 is deck material, not internal scaffolding. Second, "genuine use of
+AI-driven behaviour" is what punishes a decorative LLM, which is why the LLM component sits at
+T1 rather than last.
+
+### Technology guidelines
+
+The brief prescribes **no technology restrictions**. MediaPipe, any LLM, any framework are
+permitted. Disclosure of third-party libraries, models, datasets and APIs is **mandatory** —
+see [DISCLOSURE.md](DISCLOSURE.md).
 
 ---
 
 ## 1. Product thesis
 
 Mobile games let players move and resize buttons, but the player still adapts to the
-touchscreen. Players differ in hand size, motor ability, grip, fatigue, reach and reaction
-time. Inputs differ too: touch is fast but hard to reach; a gesture is slower but steadier;
+touchscreen. Players differ in hand size, motor ability, grip, fatigue, reach and reaction time.
+Input channels differ too: touch is fast but hard to reach; a gesture is slower but steadier;
 face movement works when both hands are occupied.
 
-The system in one line:
+The layer does two things, and both matter to the pitch.
+
+**It provides the input channels.** Touch controls and on-device hand gesture recognition,
+behind one uniform interface. A game adopting the layer gets alternative controls without
+building a camera pipeline, integrating a model, or writing per-channel plumbing. This is the
+half that makes it adoptable: a studio that only received *advice* would still have to build
+every channel itself.
+
+The same `InputChannel` interface is designed to accept further channels — face blendshapes,
+device tilt, sound. **Those are described as designed, not delivered, until one of them actually
+runs.** Claim discipline matters here: it is far better to ship two channels and an interface
+that visibly accommodates more than to imply capabilities the demo does not have.
+
+**It assigns those channels to actions, per player.**
 
 > **Declared action requirements × measured input capabilities → assignment, with an explanation.**
 
-Action requirements are *declared* (Dodge is latency-critical; Ability is not). Input
-capabilities are *measured per player* (this player's touch accuracy, this player's gesture
-latency). The recommender combines them, explains itself, and the result is validated
-before/after.
+Games *declare* what their actions need. The layer *measures* what this particular player can
+do. The recommender matches the two, explains itself, and the result is validated before/after.
 
-The novelty is **not gesture recognition** — Project Gameface and Cephable already validate
-alternative controls. The contribution is the measurement, the explainable assignment policy,
-and the validation.
+**The product is the layer, not the game.** It knows nothing about any particular title. Swarmfall
+is one host; a structurally different game should be able to adopt it without the layer changing.
+
+Providing alternative input is not itself novel — Project Gameface and Cephable already do it.
+What none of them do is measure *this* player on *each* channel and assign actions accordingly.
+The contribution is the combination: channels supplied as infrastructure, plus per-player
+measurement, an explainable assignment policy, and validation that the change actually helped.
+
+Because the layer owns every channel, it can also *enforce* parity between them (D16) — something
+no bolt-on overlay is in a position to guarantee.
+
+### Integration surface
+
+What a developer writes to adopt the layer:
+
+```ts
+// The layer supplies these — the game builds no input code of its own.
+adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
+
+adaptive.registerActions([
+  { id: 'LASSO',  requirements: { spatial: true,  latencyCritical: false } },
+  { id: 'RECALL', requirements: { spatial: false, latencyCritical: false } },
+  { id: 'HOLD',   requirements: { spatial: false, latencyCritical: false } },
+]);
+
+adaptive.on('RECALL', () => swarm.recall());
+```
+
+The game never touches a pointer event, a hand landmark or a camera stream. This snippet is a
+deck slide.
 
 ---
 
 ## 2. Locked decisions
 
-Settled. Implement, do not relitigate.
-
 | # | Decision | Why |
 |---|---|---|
-| D1 | **`ActionBus` + `BindingMap` built in the setup phase**, before there is anything to bind. | Accepting a recommendation must be a one-line runtime map mutation, not a code change. Without this the core demo is impossible. |
-| D2 | **`CalibrationScene` is the primary measurement instrument** — a prompted cue-response task. | In-game taps give no ground truth for player *intent*. A cue → response trial does. |
-| D3 | **Latency defined identically for every input**: cue onset → activation, ms. | Gesture includes a stability window and will likely be *slower* than touch. That is the real finding. Do not fabricate favourable numbers. |
-| D4 | **Auto-fire at nearest enemy.** Joystick controls movement only. | Genre-standard, frees a thumb, removes continuous aiming from the remappable set entirely. |
-| D5 | **Hand gesture is input #1.** Face is T4. | `GestureRecognizer` ships canned categories and confidence scores. Proves the pipeline cheapest. |
-| D6 | **Face input, if built, uses blendshapes (`jawOpen`), never head yaw/pitch.** | A handheld phone moves with the player's hands, corrupting camera-relative head pose. Blendshapes are face-relative and **substantially less affected** — though still degraded by poor lighting, extreme angles, occlusion and talking. Not immune. |
-| D7 | **Only one vision model runs at a time** — whichever channel owns a currently-bound source. | Two MediaPipe models on one stream roughly doubles inference cost and hurts frame rate on mid-range Android. |
-| D8 | **Deploy to HTTPS in the setup phase**, before there is a game. | `getUserMedia` needs a secure context; `vite --host` over LAN is HTTP and the camera is silently blocked. Also the submission artifact. |
-| D9 | **`ui/layout.ts` returns all HUD positions from `(width, height)` from the first commit.** | Tuning landscape only, but portrait won't break. ~1 h now vs ~1 day retrofitted. |
-| D10 | **Roguelike content (XP, upgrade cards, boss) is cut.** | Contributes nothing to the thesis. |
-| D11 | **`DODGE` is latency-critical and stays on touch unconditionally.** The recommender refuses to move it and says why. | See §4.1 — this is the evidence that the recommender reasons rather than always preferring the novel input. |
-| D12 | **`BindingMap` governs dispatch, not just configuration.** An action emitted by a source reaches listeners only if that source is currently bound to it. | Otherwise touch *and* gesture both fire `ABILITY` after a rebind and the central demo silently fails. |
-| D13 | **`InputSourceId` and `InputChannelId` are separate concepts.** | `BindingMap` binds *sources* (`TOUCH_ABILITY`, `HAND_CLOSED_FIST`). `InputChannel` is the lifecycle owner (touch, hand-vision) that D7 starts and stops. One model provides several bindable sources. |
-| D14 | **The only adaptation implemented is moving an action to a different input.** Layout findings (bias, hitbox, debounce) are **advisory text only**, never auto-applied. | Auto-applying layout changes is a second system with its own failure modes, and layout advice needs more samples than calibration provides. Displaying the analysis is near-free and still shows the work. |
-| D15 | **In-game telemetry is reduced to a single counter**: Ability activations attempted vs succeeded during a round. | Calibration is the primary evidence (§6.4). Full in-game telemetry is a day of plumbing for a secondary number. |
-| D16 | **Squad tactics are Follow and Spread only.** Focus is T4. | Focus needs target selection and priority logic — the fiddliest squad work for the least visible payoff. |
+| D1 | **`ActionBus` + `BindingMap` are built before anything binds to them.** | Accepting a recommendation must be a one-line runtime map mutation, not a code change. Without this the core demo is impossible. |
+| D2 | **Measurement is a prompted cue-response task**, not in-game input. | A missed tap is indistinguishable from no tap. A cue gives ground truth for player *intent*. |
+| D3 | **Latency is defined identically for every channel**: cue onset → activation, ms. | Vision channels include a stability window and will measure *slower* than touch. That is the real result. Do not fabricate favourable numbers. |
+| D4 | **`BindingMap` governs dispatch, not just configuration.** | Otherwise touch *and* gesture both fire after a rebind, and the demo silently fails. |
+| D5 | **Telemetry taps the stream pre-gate.** Rejected emissions are recorded, not discarded. | The unbound channel must keep being measured — that is what produces the before/after. Rejected emissions are also habit-persistence data. |
+| D6 | **`InputSourceId` and `InputChannelId` are separate concepts.** | Bindings bind *sources* (`HAND_CLOSED_FIST`). Channels (`HAND_VISION`) own lifecycle. One model provides several sources. |
+| D7 | **Only one vision model runs at a time** — whichever channel owns a bound source. | Two MediaPipe models on one stream roughly doubles inference cost and hurts frame rate on mid-range Android. |
+| D8 | **The recommender warns; it never blocks.** Actions whose requirements are poorly served by a channel produce a warning with a **quantified cost**, and the player may override it. | Refusing to let a player remap their own controls is paternalistic, and paternalism is the wrong posture for an accessibility product — the premise is that the player knows their own needs. Quantifying the cost ("your lasso accuracy was 91% on touch and 64% on gesture") is still evidence the system reasons about requirements, while leaving the decision where it belongs. |
+| D9 | **The layer never imports from `demos/`.** | The one-way dependency is what makes the portability claim verifiable rather than asserted. |
+| D10 | **Hand gesture is channel #1.** Face and tilt are T3. | `GestureRecognizer` ships canned categories and confidence scores. Proves the pipeline cheapest. |
+| D11 | **Face input, if built, uses blendshapes (`jawOpen`), never head pose.** | A handheld phone moves with the player's hands, corrupting camera-relative head pose. Blendshapes are face-relative and substantially less affected — though still degraded by poor lighting, occlusion and talking. Not immune. |
+| D12 | **Deploy to HTTPS before building features.** | `getUserMedia` needs a secure context; LAN access over plain HTTP silently blocks the camera. Also the submission artifact. |
+| D13 | **The LLM fills slots in a fixed schema validated server-side.** It never generates freely, never enters the real-time loop, never writes gameplay code. | Player creativity comes from combining allowlisted primitives. Unbounded generation cannot be validated and will break in demo. |
+| D14 | **The recommender is a transparent rule set, not a trained model.** | It must justify itself to the player before changing their controls. Explainability is the feature, not a limitation. |
+| D15 | **Only one adaptation is implemented: moving an action to a different channel.** Layout findings are advisory text, never auto-applied. | Auto-applying layout changes is a second system with its own failure modes, and layout advice needs more samples than calibration provides. |
+| D16 | **Channels may differ in speed and reliability. They must never differ in capability.** | Every command reachable by gesture must also be reachable by touch. Otherwise the alternative channel is a power-up, the accessibility framing collapses, and a judge correctly calls it a cheat. |
 
 ---
 
-## 3. Demo ergonomics
+## 3. Demo host: Swarmfall
 
-A player holding a phone in landscape with both thumbs on screen **cannot make a fist at the
-front camera.** The demo is split so each segment resolves this honestly.
+Swarmfall is a real-time swarm control game: the player lassos territories, units divide
+themselves among targets inside the loop, harvesters extract and bank ore, guards intercept
+threats. Sixty-second rounds.
 
-**Segment A — direct control (primary, must ship).** Phone propped in a stand or held
-one-handed. Ability is the remap candidate, using hand gesture. Carries the
-calibration → recommendation → before/after story.
+**Why it fits the thesis better than a conventional action game:**
 
-**Segment B — squad control (T1).** One hand on screen, other hand gesturing to toggle tactic.
-Justified because squad commands are non-urgent, so briefly losing a thumb costs nothing.
+- Units act autonomously, so **input bandwidth is low**. The player issues occasional commands
+  rather than continuous twitch input — which is precisely what makes alternative channels
+  viable. The genre supports the argument rather than merely hosting it.
+- The loop is **bursty**: draw, let the swarm work, redraw. Those gaps are where a gesture fits,
+  so the hands-on-screen conflict is far less severe than in a shooter.
+- The lasso is **obviously spatial**, so the recommender's advice against moving it — and the
+  measured precision cost it quotes — is self-evidently sensible rather than a designed contrivance.
 
-**Segment C — face input (T4).** Both thumbs on screen, `jawOpen` triggers Ability. Strongest
-accessibility beat because the hands are genuinely unavailable. Ships only if everything else
-is done.
+### Actions
 
-Test condition framing: **one-handed grip / thumb reach on a large phone.** A real,
-demonstrable constraint. Never claimed to simulate any disability.
+| Action | Requirements | Role |
+|---|---|---|
+| `LASSO` | `spatial: true` | Movement/territory indicator. Remappable, but **warned against with a quantified precision cost (D8)**. Already exists. |
+| `SELECT_TROOP_TYPE` | discrete | Toggle guards / harvesters |
+| `RECALL` | discrete, non-urgent | Primary remap candidate |
+| `HOLD` | discrete, non-urgent | Second remap candidate |
 
----
+`RECALL` and `HOLD` are deliberately **declarative player intents** — return to core, stop and
+defend — with no reading of live game state. A command that inspected the world to pick its own
+target would be a macro, and that is the thing §12 rules out.
 
-## 4. Game format
+**The 2–3 discrete commands must be added.** Without them there is nothing to measure or remap,
+and the thesis has no surface in this game. This is the one structural requirement of the
+integration.
 
-2D top-down squad survivor, one arena, two rounds.
+### Ergonomics
 
-| Setting | Round length |
-|---|---|
-| Development / testing | **45–60 s** |
-| Demo & video recording | **30 s** |
+A player holding a phone with both thumbs cannot make a fist at the front camera. Two honest
+configurations:
 
-Short rounds are correct because calibration — not gameplay — is the primary evidence, and a
-predictable short demo beats a large volume of noisy telemetry.
+- **Phone propped or held one-handed**, other hand gesturing. Carries the
+  calibration → recommendation → before/after story.
+- **Both thumbs on screen**, face blendshape triggers a command (T3). The strongest accessibility
+  beat, because the hands are genuinely unavailable.
 
-- Player character; movement via virtual joystick.
-- Auto-fire at nearest enemy in range.
-- `ABILITY` — discrete, latency-tolerant. **The remap candidate.**
-- `DODGE` — discrete, latency-critical. **Never remapped (D11).**
-- Two AI teammates: Follow / Spread.
-- One enemy type, constant spawn rate, contact damage on cooldown, player HP bar.
-- Round ends on timer or death.
-
-Not building: 3D, FPS, MOBA, commercial-game overlay, multiplayer, procedural maps, inventory,
-boss, upgrade cards, XP.
-
-Terminology: **"squad control as a small-scale proof of the broader swarm-control concept."**
-Two teammates are never described as a swarm.
-
-### 4.1 What Dodge is, and why it exists
-
-A **dodge/dash** is a short burst of movement on a cooldown, usually with brief invulnerability.
-Common in the genre (Soulstone Survivors, Death Must Die, 20 Minutes Till Dawn all have one), so
-it does not look bolted on.
-
-But that is not why it is in this plan. **Dodge exists so the recommender has something to refuse.**
-
-**Dodge is never calibrated, never measured, never remapped.** It only needs to exist as an
-action carrying `latencyCritical: true`. When the recommender runs it outputs:
-
-> *"Dodge is latency-critical. Gesture input adds ~200 ms. Keeping Dodge on touch."*
-
-That single line is the evidence that the system reasons from requirements rather than simply
-preferring whatever input is novel. Ability and Dodge are outwardly identical — both discrete,
-both a button — and differ only in declared requirements. That contrast **is** the product.
-
-Cost: a velocity burst for ~150 ms, a cooldown timer, one HUD button. No telemetry, no gesture
-work, no calibration.
-
-**Fallback if cut:** have the recommender refuse to remap `MOVE` instead. Free, but weaker —
-steering with a fist is obviously implausible, so refusing it is unsurprising.
+Test framing: **one-handed grip and thumb reach on a large phone.** A real, demonstrable
+constraint. Never claimed to simulate any disability.
 
 ---
 
-## 5. Architecture
+## 4. Architecture
 
-### 5.1 The keystone
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the reviewer-facing version. Design notes here.
 
-Every input emits abstract actions. No entity ever reads a pointer, a landmark or an audio buffer.
+### 4.1 Data flow
 
 ```
 TouchControls ─┐
 GestureInput  ─┼─► ActionBus.emit(action, { source, timestamp, ... })
-FaceInput(T4) ─┘
+FaceInput     ─┘
                         │
-                        ├──────────────► TelemetryRecorder   (PRE-GATE — records every
-                        │                                     emission from every input,
-                        │                                     bound or not)
+                        ├──────────────► TelemetryRecorder   (PRE-GATE, D5)
                         ▼
-              BindingMap.get(action) === payload.source ?
+              BindingMap.get(action) === payload.source ?     (D4)
                         │
                  no ────┴──── yes
                  │             │
                  ▼             ▼
         log as rejected   dispatch to listeners
-        (habit data)              │
-                                  ▼
-                    Player.listen(ABILITY, () => this.useAbility())
 ```
 
-Two rules that are easy to get wrong:
-
-1. **The gate is on dispatch, never on recording.** Telemetry taps the stream *before* the
-   binding check. The unbound input must keep being measured — that is exactly what produces
-   the before/after comparison.
-2. **Rejected emissions are logged, not discarded.** "The player still reached for the old touch
-   button 4 times after rebinding" is real habit-persistence data and a good demo detail.
-
-Accepting a recommendation is then one line, at runtime:
+Accepting a recommendation is one line, at runtime:
 
 ```ts
-bindings.set(GameAction.ABILITY, InputSourceId.HAND_CLOSED_FIST);
+bindings.set('RECALL', InputSourceId.HAND_CLOSED_FIST);
 ```
 
-### 5.2 Typed payloads
+### 4.2 Typed payloads
 
-`MOVE` carries an analogue vector; discrete actions carry confidence. One loose payload type
-cannot support both.
+Continuous actions carry a vector; discrete actions carry confidence. One loose type cannot
+serve both.
 
 ```ts
-interface ActionPayloadMap {
-  [GameAction.MOVE]:         { x: number; y: number };
-  [GameAction.ABILITY]:      { confidence?: number };
-  [GameAction.DODGE]:        { confidence?: number };
-  [GameAction.SQUAD_FOLLOW]: { confidence?: number };
-  [GameAction.SQUAD_SPREAD]: { confidence?: number };
-}
-
 type Payload<A extends GameAction> =
   ActionPayloadMap[A] & { source: InputSourceId; timestamp: number };
 
@@ -204,160 +210,99 @@ emit  <A extends GameAction>(action: A, payload: Payload<A>): void;
 listen<A extends GameAction>(action: A, fn: (p: Payload<A>) => void): void;
 ```
 
-`MOVE` routes through the bus for consistency but is **non-remappable by policy (D4)**.
-
-### 5.3 Sources vs channels (D13)
-
-```ts
-enum InputChannelId { TOUCH, HAND_VISION, FACE_VISION }
-
-enum InputSourceId {
-  TOUCH_JOYSTICK, TOUCH_ABILITY, TOUCH_DODGE, TOUCH_TACTIC,
-  HAND_CLOSED_FIST, HAND_OPEN_PALM,
-  FACE_JAW_OPEN,                    // T4
-}
-```
-
-`BindingMap: Map<GameAction, InputSourceId>`. A channel starts when any of its sources is bound
-and stops when none are — that is D7's one-model-at-a-time rule.
-
-**Initial bindings:**
+### 4.3 Repository layout
 
 ```text
-MOVE          -> TOUCH_JOYSTICK
-ABILITY       -> TOUCH_ABILITY
-DODGE         -> TOUCH_DODGE
-SQUAD_FOLLOW  -> TOUCH_TACTIC
-SQUAD_SPREAD  -> TOUCH_TACTIC
+packages/
+└── adaptive-input/          the product
+    ├── input/
+    │   ├── ActionBus.ts     ─┐
+    │   ├── BindingMap.ts     ├─ spine                          [core]
+    │   ├── InputChannel.ts  ─┘  (merged first, unblocks all)
+    │   ├── TouchControls.ts    channel                         [touch]
+    │   ├── TouchTelemetry.ts   channel                         [touch]
+    │   └── GestureInput.ts     channel                         [vision]
+    ├── calibration/         cue-response measurement           [core]
+    ├── recommendation/      InputScorer, ControlRecommender    [core]
+    └── data/                SessionTelemetry, PlayerProfile    [core]
+
+demos/
+├── swarmfall/               host 1 — the demo                  [core]
+└── survivor/                host 2 — portability proof (T2)
 ```
 
-### 5.4 Scene flow
+`packages/adaptive-input/` must never import from `demos/` (D9).
 
-Four scenes, two reused. No main menu — the start button lives on the first calibration screen.
+### 4.4 Stack
 
 ```text
-CalibrationScene (touch)  →  SurvivorScene (round 1)  →  CalibrationScene (gesture)
-        →  RecommendationScene (accept / reject)  →  SurvivorScene (round 2)
-        →  ResultsScene (before / after)
+TypeScript (strict) · Vite · Phaser 3.90.x · @mediapipe/tasks-vision
+Vercel or Netlify, auto-deploy from main
 ```
-
-Total run: roughly 5 minutes. That is the demo.
-
-### 5.5 File structure
-
-Directories map one-to-one onto tracks (§9), so no two people edit the same file.
-
-```text
-src/
-├── config/
-│   └── balance.ts             ← every tuning number in one place      [Track 2]
-├── input/                                                             [Track 1]
-│   ├── GameAction.ts          ← setup phase, types first
-│   ├── InputSourceId.ts       ← setup phase, types first
-│   ├── ActionBus.ts           ← setup phase, types first
-│   ├── BindingMap.ts          ← setup phase, types first
-│   ├── InputChannel.ts        ← interface: id, sources[], start(), stop(), isActive
-│   ├── TouchControls.ts
-│   ├── TouchTelemetry.ts
-│   └── GestureInput.ts
-├── recommendation/                                                    [Track 1]
-│   ├── InputScorer.ts
-│   ├── ControlRecommender.ts
-│   └── RecommendationTypes.ts ← setup phase, types first
-├── data/                                                              [Track 1]
-│   ├── SessionTelemetry.ts
-│   └── PlayerProfile.ts       ← localStorage-persisted
-├── scenes/
-│   ├── CalibrationScene.ts    ← the measurement instrument            [Track 1]
-│   ├── SurvivorScene.ts                                               [Track 2]
-│   ├── RecommendationScene.ts                                         [Track 3]
-│   └── ResultsScene.ts                                                [Track 3]
-├── entities/  (Player, Teammate, Enemy, Projectile)                    [Track 2]
-├── squad/     (SquadController)                                        [Track 2]
-├── ui/                                                                 [Track 3]
-│   ├── layout.ts              ← D9, all HUD positions derive from (w, h)
-│   ├── GameHUD.ts
-│   └── RecommendationPanel.ts
-└── main.ts
-```
-
-### 5.6 Stack
-
-```text
-TypeScript (strict: true)
-Vite
-Phaser 3.90.x            ← not Phaser 4; v3 has far more examples and answers
-@mediapipe/tasks-vision
-Vercel or Netlify (auto-deploy from main)
-```
-
-**No art required.** Phaser `Graphics` draws coloured circles and rectangles; a top-down
-survivor made of shapes is perfectly legible on video. Optional: free CC0 sprites from
-kenney.nl dropped into `public/` — about two hours, T4.
 
 MediaPipe model files live in `public/` and load via
-`FilesetResolver.forVisionTasks("/mediapipe/wasm")` — not Google's CDN. Avoids CDN latency and
-blocking, and enables an offline demo. ~8 MB in git is fine.
-
-Vision inference runs on its own timer at **10–15 fps**, decoupled from Phaser's render loop, at
-low input resolution.
+`FilesetResolver.forVisionTasks("/mediapipe/wasm")` rather than Google's CDN — avoids CDN latency
+and blocking, and enables an offline demo. Vision inference runs on its own timer at **10–15 fps**,
+decoupled from the render loop, at low input resolution.
 
 ---
 
-## 6. Measurement methodology
+## 5. Measurement
 
-### 6.1 Calibration task
+### 5.1 Calibration task
 
-`CalibrationScene` runs a prompted cue-response trial per input:
+A prompted cue-response trial per channel:
 
-1. Random delay (1.5–3.5 s), then a cue flashes.
-2. The player performs the action on the input under test.
-3. Record outcome and timing.
+1. Random delay 1.5–3.5 s, then a cue appears.
+2. The player responds on the channel under test.
+3. Outcome and timing recorded.
 
-**Adaptive trial count.** A fixed 12 is too fragile: one trial moves the success rate by 8.3
-points, so 9/12 (75%) and 10/12 (83%) land on opposite sides of an 80% threshold.
+**Adaptive trial count.** A fixed 12 is too fragile — one trial moves the success rate by 8.3
+points, so 9/12 (75%) and 10/12 (83%) straddle an 80% threshold.
 
 ```text
 Run 12 trials.
-IF the two inputs differ by >= 15 percentage points → stop.
+IF the two channels differ by >= 15 percentage points → stop.
 ELSE run 8 more (20 total).
 Recorded evaluation sessions always use 20.
 ```
 
-Report the actual trial count on screen. Describe this as **adaptive stopping, not a controlled
+Report the actual trial count on screen. Describe as **adaptive stopping, not a controlled
 trial** — optional stopping inflates false-positive rates, acceptable for a prototype but not to
 be written up as a study.
 
-**Dedicated false-activation window.** After the trials, run a **20–30 s no-cue period** where
-the player waits or moves without performing the tested action. Inter-trial gaps are too short
-and the player is actively anticipating the next cue.
+**Dedicated false-activation window.** After the trials, a **20–30 s no-cue period** where the
+player waits without performing the tested action. Inter-trial gaps are too short and the player
+is anticipating the next cue.
 
-### 6.2 Metrics
+### 5.2 Metrics
 
-| Metric | Inputs | Definition |
+| Metric | Channels | Definition |
 |---|---|---|
 | Success rate | all | activations / cues |
-| **Latency (median)** | all | **cue onset → activation, ms — identical definition for every input (D3)** |
-| False activation rate | all | activations per minute during the dedicated no-cue window |
+| **Latency (median)** | all | **cue onset → activation, ms — identical for every channel (D3)** |
+| False activation rate | all | activations per minute during the no-cue window |
 | Miss distance | touch | px from button centre for failed taps |
 | Drift | touch | touchstart → touchend displacement |
-| Directional bias | touch | mean offset vector across all taps |
+| Directional bias | touch | mean offset vector |
 | Repeat-tap rate | touch | % of taps <150 ms after the previous |
 | Stability time | vision | ms held above threshold before trigger |
 | Confidence (median) | vision | model score at trigger |
-| **In-game Ability success** | all | **the single in-game counter (D15): attempted vs succeeded** |
+| In-game command success | all | attempted vs succeeded, during a round |
 
-Persisted to `PlayerProfile` in localStorage. JSON export button (T4).
+Persisted to `PlayerProfile` in localStorage.
 
-### 6.3 Recommender rules
-
-Transparent, no trained model.
+### 5.3 Recommender rules
 
 ```text
-── IMPLEMENTED: input remapping (D14) ──
+── IMPLEMENTED: channel remapping ──
 
-IF action.latencyCritical                              (D11 — this is DODGE)
-    → keep on touch, always. Explain why.
+IF action.spatial OR action.latencyCritical                    (D8)
+    → do not recommend moving it.
+      If the player chooses to move it anyway, show a warning quantifying
+      the measured cost from calibration, and allow the override.
+      e.g. "Lasso accuracy: 91% on touch, 64% on gesture.
+            Precision will drop. Move it anyway?"
 
 IF touch.successRate < 0.80
    AND alt.successRate > touch.successRate + 0.10
@@ -367,230 +312,212 @@ IF touch.successRate < 0.80
 IF alt.falseActivationRate > 1.0 per minute
     → never recommend alt, regardless of accuracy
 
-── ADVISORY TEXT ONLY, never auto-applied (D14) ──
+── ADVISORY TEXT ONLY, never auto-applied (D15) ──
 
 IF mean tap offset > 25% of button radius
    AND >= 60% of taps fall on the same side of centre
-    → display: "your taps land consistently <direction> of centre"
+    → "your taps land consistently <direction> of centre"
 
 IF >= 20% of failed taps land within 1.5x button radius
-    → display: "a larger hitbox would have captured N of your misses"
+    → "a larger hitbox would have captured N of your misses"
 
 IF repeat-tap rate > 15%
-    → display: "frequent double-taps detected; a longer debounce may help"
+    → "frequent double-taps detected; a longer debounce may help"
 ```
 
-Bias is a **proportion of button radius**, not a fixed pixel count, so it scales across devices
-and button sizes. (At a 48 px radius this equals 12 px.)
-
+Bias is a **proportion of button radius**, not a fixed pixel count, so it scales across devices.
 Every recommendation carries a plain-language explanation and **Accept / Reject**. Changes apply
-**between rounds only**, never mid-combat.
+**between rounds only**, never mid-play.
 
-### 6.4 Before/after validation
+### 5.4 Before/after validation
 
-The headline comparison is the **calibration re-run**, not round score. Cue-response has minimal
-learning effect; round 2 of the game is confounded by practice. At 45–60 s rounds the player also
-only triggers Ability ~8–12 times, too few to compare reliably.
+The headline comparison is the **calibration re-run**, not round score — cue-response has minimal
+learning effect, whereas a second round of play is confounded by practice.
 
 - **Primary:** calibration metrics, touch vs gesture, identical task.
-- **Secondary:** the single in-game Ability counter (D15), round 1 vs round 2, with the learning
-  effect stated out loud.
+- **Secondary:** in-game command success, round 1 vs round 2, with the learning effect stated.
 
 Stating the confound pre-empts the most obvious challenge and costs one sentence.
 
 ---
 
+## 6. AI components
+
+| Component | Role | Runs |
+|---|---|---|
+| MediaPipe Tasks Vision | On-device gesture recognition | In-browser, on-device |
+| LLM (constrained schema) | Interprets player constraints; composes commands from an allowlisted primitive grammar | Server-side function, between rounds |
+
+### The primitive grammar (T1)
+
+Games declare their available primitives. The layer exposes the combinatorial space. Players
+compose in natural language.
+
+```text
+{unit type} × {target selector} × {formation} × {trigger condition}
+```
+
+Swarmfall declares `{guards, harvesters} × {nearest-threat, core, largest-cargo} ×
+{surround, spread, intercept}`. A player who types *"keep my guards between the core and whatever
+is incoming"* gets `guards × nearest-threat × intercept` — a standing order they can name
+themselves. Nothing is hardcoded; the command did not exist until the player described it.
+
+Composed presets are **standing orders set between rounds**, not real-time macros. The
+distinction matters: a standing order is a policy the player configures in advance and can see
+running, which is ordinary strategy-game delegation. A macro is one input firing a timed
+sequence during play, which §12 rules out.
+
+Every axis is allowlisted, so every output is validated before reaching any game. Creativity
+comes from combinatorics rather than free generation (D13). A different game declares different
+primitives and the same layer works unchanged — which is a much stronger claim than "the LLM
+understands our game."
+
+The player also states constraints in natural language — *"I'm playing one-handed," "my thumb
+gets tired"* — which the LLM converts into weightings the rule-based recommender consumes. The
+rules still decide; the model interprets and explains.
+
+API credentials live in server-side environment variables, never in client code or the
+repository.
+
+---
+
 ## 7. Ship ladder
 
-Each tier is independently demoable. Work stops wherever the schedule actually lands.
+Each tier is independently demoable. Work stops wherever the schedule lands.
 
-### T0 — Thesis core · **cannot be cut**
-Without all of this there is no submission.
-
-- Arena, joystick, auto-fire, one enemy type, HP, score, two rounds
-- `ActionBus` + `BindingMap` with dispatch gating (D12) and pre-gate telemetry
-- `CalibrationScene`: cue-response, adaptive trials, no-cue window — touch **and** gesture on an identical task
-- MediaPipe closed fist → Ability
-- Recommender with plain-language explanation
+### T0 — Core · cannot be cut
+- Swarmfall integrated: lasso and 2–3 discrete commands all routed through `ActionBus`
+- `BindingMap` with dispatch gating (D4) and pre-gate telemetry (D5)
+- Calibration: cue-response, adaptive trials, no-cue window — touch **and** gesture, identical task
+- MediaPipe gesture → one discrete command
+- Recommender with plain-language explanation, and a quantified warning on `LASSO` that the
+  player can override
 - **Accept → live rebind → visibly works in round 2**
 - Before/after screen
 - Live HUD: detected input, confidence, mapped action, latency
 - Deployed HTTPS URL
 
-### T1 — Proposal coverage
-Two teammates, Follow + Spread toggle, tactic shown on HUD. **Higher priority than everything
-below**, because cutting squad entirely removes half the submitted proposal — a worse look than
-cutting the LLM. ~1 day.
+### T1 — AI legibility
+LLM primitive grammar and constraint interpretation (§6). Off the critical path — a serverless
+function, a fetch, an allowlist check. This tier is what "genuine use of AI-driven behaviour"
+in the 30% Build Quality criterion is asking for.
 
-### T2 — Distinctiveness
-The Dodge refusal beat (§4.1). Highest value-per-hour on the whole list.
+### T2 — Portability proof
+Second demo host: the survivor game cut to the bone — arena, movement, one enemy, one ability.
+Turns the middleware claim from asserted to demonstrated. Pre-empts the obvious judge objection:
+*"you built one game with custom controls and called it a platform."* ~1.5 days, conditional on
+Swarmfall integration going smoothly.
 
-### T3 — AI legibility
-LLM tactical-preset mapper. A text box converting one natural-language instruction into one of
-two constrained presets. Off the critical path — a serverless function, a fetch, an allowlist
-check. ~half a day.
+### T3 — Polish
+Advisory layout text · second gesture · face blendshape channel · tilt channel · JSON export ·
+sprite art.
 
-```json
-{ "preset": "SPREAD", "spacing": "wide", "priority": "survival" }
-```
+### Cut
+Custom-trained gestures · sound input (pitch thresholding is not itself an ML feature, and game
+audio interferes with mic input) · head pose · auto-applied layout changes · multiplayer ·
+procedural content.
 
-The API key lives in the serverless function, never in browser code. The response is validated
-against an allowlist server-side before it reaches the game. The model selects from approved
-values; it never writes gameplay code, never enters the real-time loop, never generates action
-sequences.
-
-This matters because the submitted proposal prominently featured natural-language tactical
-presets, and because it is the most legible AI feature to a non-technical judge — MediaPipe can
-be read as "an imported library," whereas this is unmistakably built.
-
-### T4 — Polish
-Advisory layout text · JSON export · second hand gesture (open palm) · face blendshape input ·
-Focus tactic · sprite art.
-
-### Cut entirely
-XP, upgrade cards, boss, extra teammates, sound input, head pose, custom-trained gestures,
-auto-applied layout changes, main menu scene, full in-game telemetry, multiplayer, procedural
-maps, inventory, Capacitor/APK.
-
-**Sound is cut.** Pitch thresholding is not itself an ML feature — a weak look in an AI
-challenge — and game audio interferes with mic input. Its conceptual role (*fast but socially
-constrained*) appears in the roadmap as a designed input, with the `InputChannel` interface as
-evidence of extensibility.
+Anything cut is presented in the deck as **designed, not shipped**, with the schema or interface
+as evidence. Explicit prioritisation reads as judgment; silence reads as abandonment. The brief
+explicitly rewards "prioritisation of trade-offs."
 
 ---
 
 ## 8. Schedule
 
-### Setup phase — 29–31 July, single person
-
-Runs while shortlist confirmation is pending. Deliberately contains no game logic, so nothing
-here is wasted and nothing blocks on team availability.
-
-| Item | Detail |
-|---|---|
-| Scaffold | Vite + TypeScript + Phaser 3.90.x, `strict: true`, Prettier, `.gitignore` |
-| Repository | `git init`, GitHub remote, first push |
-| **HTTPS deploy** | Vercel auto-deploy from `main`; URL verified on the target Android phone (D8) |
-| Types-only merge | `GameAction`, `InputSourceId`, `ActionBus`, `BindingMap`, `InputChannel`, `RecommendationTypes` — interfaces with empty bodies |
-| Binding-gate test | Passing (§10) |
-| Foundations | `ui/layout.ts`, `config/balance.ts` |
-| Stretch | Virtual joystick moving a circle on the deployed URL |
-
-Merging the types first is what lets all three tracks start in parallel on 1 August without
-waiting on each other's implementations.
-
-### Build phase — 1–9 August, three tracks
-
-| Date | Track 1 — Input & Measurement | Track 2 — Gameplay | Track 3 — Interface & Delivery |
+| Date | **Core & Integration** | **Vision Input & Screens** | **Touch Input & Quality** |
 |---|---|---|---|
-| Aug 1–2 | `CalibrationScene` cue-response loop, adaptive trials, no-cue window, `TouchTelemetry`, `InputScorer`, `PlayerProfile` | Arena, joystick, auto-fire, enemy, contact damage, HP bar, score, round timer. All input via `ActionBus` | `ui/layout.ts` build-out, `GameHUD`, scene flow wiring, device test matrix started |
-| Aug 3–4 | **MediaPipe closed fist → Ability.** Camera permission + denial path. Gesture calibration on the identical task | **T1:** two teammates, Follow + Spread, tactic action | `RecommendationPanel`, `RecommendationScene`, `ResultsScene` shells |
-| Aug 5–6 | `ControlRecommender` rules, explanation text, Accept/Reject, live rebind, before/after aggregation | **T2:** Dodge. Balance tuning from playtest feedback | UI copy for every player-facing string. Demo script written and timed. **T3** if clear |
-| **Aug 7** | **Integration day — all tracks.** Wire the halves end to end; fix what only appears when they meet. Play the full 5-minute flow repeatedly and log every break. **← T0 + T1 + T2 complete** | | |
-| Aug 8 | **Code freeze at noon.** Final device testing | Freeze at noon | **Record demo video** (multiple takes). Draft submission writeup |
-| Aug 9 | Standby for blocking bugs only | Standby | Final checks, submit. **No code** |
+| **1 Aug** | **Merge the types first**, before anything else. Then route Swarmfall's input through `ActionBus`, add `RECALL` + `HOLD` | Read the interface. Camera permission, MediaPipe loading | Read the interface. On-screen buttons emitting through the bus |
+| 2–3 Aug | `CalibrationScene` — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | `TouchTelemetry` — tap position, timing, drift, repeat taps |
+| 4–5 Aug | `InputScorer` + `ControlRecommender` — rules, explanation text, Accept/Reject, **live rebind** | Calibration and recommendation screens | Balance tuning, device test matrix, UI copy |
+| 6 Aug | Before/after aggregation | Before/after screen. **T1** LLM grammar if clear | Demo script written and timed |
+| **7 Aug** | **Integration day — everyone.** Full flow end to end, repeatedly, no reload. **T0 complete** | | |
+| 8 Aug | **Freeze at noon.** Technical slides reviewed | Freeze at noon. Deck finalised | **Record video.** README, DISCLOSURE |
+| 9 Aug | Standby for blocking bugs | Submit. **No code** | Standby |
 
-**Integration day is not optional.** Three tracks building in parallel for a week will have
-integration problems, and there must be a day budgeted for them.
+**The types merge is the only blocking dependency in the project.** It is twenty minutes of empty
+interfaces and it must be pushed before Swarmfall integration begins — otherwise two roles sit
+idle on day one.
 
-**If behind on 5 August:** cut T2 (Dodge), reduce the tactic toggle to a single Spread button,
-cut T3 entirely, and protect the integration day. A complete honest T0 beats a broken ambitious
-build.
+**Integration day is not optional.** Three people building in parallel for a week will have
+integration problems and there must be a day budgeted for finding them.
+
+**If behind on 5 August:** cut T1, reduce to a single discrete remappable command, and protect
+the integration day. A complete honest T0 beats a broken ambitious build — Build Quality is
+judged on whether it *functions end-to-end in a live setting*.
 
 ---
 
-## 9. Tracks and ownership
+## 9. Tracks
 
-Availability varies across the team. The ship ladder (§7) exists so that reduced capacity changes
-**which tier is reached**, not whether there is a submission.
+Availability varies. The ship ladder exists so reduced capacity changes **which tier is
+reached**, not whether there is a submission. See [STATUS.md](STATUS.md) for the short version.
 
-Directories map one-to-one onto tracks (§5.5), so no two people edit the same file.
+### The shape of the work
 
-### Track 1 — Input & Measurement
-**Owns:** `input/`, `recommendation/`, `data/`, `CalibrationScene.ts`
+```
+ActionBus → Calibration → Scorer → Recommender → Before/After    ← SERIAL, one owner
+     ↑
+TouchControls · GestureInput · (FaceInput)                       ← PARALLEL, one each
+     ↓
+Screens · deck · video · deployment                              ← PARALLEL
+```
 
-The critical path: calibration → gesture → recommender → before/after. Serial, and the one part
-that cannot be parallelised. Algorithmic and testable, and **requires no game-development
-experience** — which makes it the right assignment for the strongest general coder regardless of
-whether they have built a game before.
+The **spine** is serial and cannot be split: each stage consumes the previous one's output.
+**Channels** are independent implementations of one interface — they share no state, live in
+separate files, and parallelise perfectly.
 
-**Single ownership.** This is the highest-risk merge surface in the project; concurrent editing
-here costs more than it saves.
+Do not split the spine by channel. Three channels and no recommender is nothing; one channel and
+a complete spine is the entire demo.
 
-### Track 2 — Gameplay
-**Owns:** `entities/`, `squad/`, `SurvivorScene.ts`, `config/balance.ts`
+### Allocation
 
-Player, enemies, projectiles, teammates, the arena, and every tuning number. Game bugs are
-*visible*, which makes this the most forgiving track to build with an agent and to review by
-reading rather than authoring.
+| Role | Owns | Rationale |
+|---|---|---|
+| **Core & Integration** | Swarmfall integration, then the **spine** — `ActionBus`, `BindingMap`, calibration, scorer, recommender | Integration requires familiarity with the Swarmfall codebase, so it goes wherever that knowledge already is. The spine is algorithmic and testable and needs no game-development experience. **This is the largest share of the product and it runs all week — not a setup task followed by a handoff.** |
+| **Vision Input & Screens** | `GestureInput` (MediaPipe), then the calibration and recommendation screens | The highest-risk single component in the project: T0 fails without a working alternative channel. Allocate accordingly. |
+| **Touch Input & Quality** | `TouchControls` + `TouchTelemetry`, then balance tuning, device testing, demo script | Self-contained and lower risk, but load-bearing — calibration cannot measure touch until it exists. Also owns tuning, which nothing else on the schedule makes time for. |
 
-Also owns **balance tuning** — collecting playtest feedback and adjusting `config/balance.ts`
-until the game feels right. Nothing else on the schedule will make time for this, and an untuned
-game feels bad on video.
-
-### Track 3 — Interface & Delivery
-**Owns:** `ui/`, `RecommendationScene.ts`, `ResultsScene.ts`, deployment, device testing, UI copy,
-**demo video and submission writeup**
-
-Self-contained UI components with clear specs (the HUD panel: given
-`{detected, confidence, action, latency, tactic}`, render five lines at positions from
-`layout.ts`) plus everything that turns a working build into a submission.
-
-**Delivery is not overhead.** A working prototype nobody sees loses to a smaller prototype
-presented well. The video and writeup are roughly two days of real work and should sit with the
-most consistently available member.
+**Deliverables.** Deck content goes wherever the thesis is best understood, with technical slides
+reviewed by Core. Device testing, the demo script and raw recording sit with Touch Input &
+Quality. No single role absorbs all three deliverables.
 
 ### Working rules
-- Feature branches, PRs **merged same day**. A three-day branch is a merge conflict with interest.
-- **Never two people in one file.** Tracks own disjoint directories by design.
-- Types with empty implementations merge first, so tracks never block on each other.
-- 10-minute daily sync: what merged / what is blocked / what merges tomorrow.
-- Do not add scope because a tier finished early. Move to the next tier, or stop.
+- Branch per person, PRs **merged same day**. A three-day branch is a merge conflict with interest.
+- `git pull` on `main` before starting each day.
+- Never two people in one file — the allocation above makes this automatic.
+- **Types with empty implementations merge first.** The only blocking dependency in the project.
+- Update [DISCLOSURE.md](DISCLOSURE.md) the moment a dependency is added.
+- Do not add scope because a tier finished early.
 
 ---
 
 ## 10. Acceptance criteria
 
-### Setup phase — end of 31 July
-1. `npm run build` passes, `strict: true`, zero errors.
-2. Phaser boots a scene, `Scale.FIT`, responsive to viewport.
-3. Deployed; the HTTPS URL opens correctly on the target Android phone.
-4. `ui/layout.ts` exports `(width, height) => positions`. `config/balance.ts` exists.
-5. **Binding-gate test passes.** With `ABILITY -> TOUCH_ABILITY`, a `TOUCH_ABILITY` emission
-   reaches listeners and `HAND_CLOSED_FIST` does not. After
-   `bindings.set(ABILITY, HAND_CLOSED_FIST)`, the reverse holds. **In both configurations, both
+### 31 July
+1. Repo live and private; collaborators accepted.
+2. Swarmfall source confirmed exportable and extensible.
+3. Types merged: `GameAction`, `InputSourceId`, `ActionBus`, `BindingMap`, `InputChannel`.
+4. **Binding-gate test passes.** With `RECALL → TOUCH_RECALL`, a touch emission dispatches and a
+   gesture emission does not. After rebinding, the reverse holds. **In both configurations, both
    emissions appear in telemetry.**
 
-### Playable game — end of 2 August
-1. Loads from the deployed URL on a real phone, landscape, no console errors.
-2. Joystick moves the player; movement uses `delta` (frame-rate independent).
-3. Auto-fire at nearest enemy; projectiles despawn off-screen or on hit, no leaks.
-4. Enemies spawn on a timer, move toward the player, deal contact damage on cooldown.
-5. HP bar; reaching 0 ends the round. Score visible.
-6. Round runs its configured duration and exits cleanly.
-7. Ability and Dodge fire and respect cooldowns.
-8. **`Player` responds only to `ActionBus` events — zero pointer/touch API references in `entities/`.**
-9. **All HUD positions derive from `ui/layout.ts`.** All tuning numbers live in `config/balance.ts`.
-10. ≥45 fps on the target Android with ~20 enemies and ~30 projectiles.
+### 2 August
+5. Swarmfall runs from the deployed HTTPS URL on a real phone.
+6. Lasso and all discrete commands route through `ActionBus`. **Zero direct pointer/touch API
+   references in game logic.**
+7. `npm run build` passes with `strict: true`, zero errors.
 
-> Criteria 8–9 are the ones that get skipped under time pressure. Every later tier depends on
-> them; retrofitting them during integration week is what loses the deadline.
-
-### T0 complete — end of 7 August
-1. The full 5-minute flow runs end to end without a reload.
-2. Calibration produces per-input metrics for touch and gesture on an identical task, with
-   adaptive trial count and a dedicated no-cue window.
-3. Recommender emits a recommendation with a plain-language explanation.
-4. **Accept rebinds at runtime and the gesture visibly works in round 2.**
-5. Reject leaves bindings unchanged.
-6. Before/after screen shows calibration deltas plus the in-game Ability counter, with the
-   confound noted.
-7. HUD shows detected input, confidence, mapped action, latency.
-8. Camera denial leaves the game fully playable on touch.
-
-### T1 / T2 complete
-9. Two teammates follow and auto-attack; the tactic toggle visibly changes their formation.
-10. Recommender **declines** to move Dodge and states why.
+### 7 August — T0 complete
+8. Full flow runs end to end without a reload.
+9. Calibration produces per-channel metrics for touch and gesture on an identical task.
+10. Recommender emits a recommendation with a plain-language explanation.
+11. **Accept rebinds at runtime and the gesture visibly works in round 2.** Reject changes nothing.
+12. Recommender does not recommend remapping `LASSO`; if the player overrides, it shows the
+    **quantified precision cost** from calibration and still applies the change.
+13. Before/after screen shows calibration deltas, with the practice confound noted.
+14. HUD shows detected input, confidence, mapped action, latency.
+15. Camera denial leaves the game fully playable on touch.
 
 ---
 
@@ -598,131 +525,58 @@ most consistently available member.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Rebinding requires code changes → demo impossible | **Critical** | D1 + D12 in the setup phase, with a passing gate test |
-| No ground truth for "accuracy" | **Critical** | D2 prompted cue-response calibration |
-| Tracks do not integrate | **High** | 7 Aug is a dedicated integration day, not a feature day |
-| Binding gate blocks telemetry → no before/after data | **High** | §5.1 gate on dispatch only; record pre-gate |
-| HTTPS not ready → camera blocked on phone | **High** | D8 deploy in the setup phase, before there is a game |
-| MediaPipe + Phaser tank frame rate | **High** | D7 one model at a time; 10–15 fps inference; low input resolution |
-| Uneven availability across the team | **High** | Ship ladder — every tier boundary is a valid stopping point |
-| One trial flips the recommendation | Medium | §6.1 adaptive trial count |
-| Gesture latency worse than touch, numbers look bad | Medium | D3 — it *will* be. Report honestly; it is the tradeoff the recommender exists for |
-| Before/after confounded by practice | Medium | §6.4 calibration is the headline metric |
-| Untuned game feels bad on video | Medium | Track 2 owns balance; `config/balance.ts` makes tuning a one-file change |
-| iOS Safari: no fullscreen, no orientation lock | Low | D9 target Android Chrome; portrait survives untuned |
+| Swarmfall source not exportable or not extensible | **Critical** | Confirm 31 July. Complete source is a required deliverable |
+| Rebinding requires code changes → demo impossible | **Critical** | D1 + D4, built first, with a passing gate test |
+| No ground truth for accuracy | **Critical** | D2 prompted cue-response |
+| Tracks do not integrate | **High** | 7 August is a dedicated integration day |
+| Gate blocks telemetry → no before/after data | **High** | D5 gate on dispatch only, record pre-gate |
+| HTTPS not ready → camera blocked | **High** | D12 deploy before building features |
+| MediaPipe tanks frame rate | **High** | D7 one model at a time; 10–15 fps inference |
+| No discrete commands in Swarmfall → thesis has no surface | **High** | §3 — the one structural requirement of integration |
+| Uneven availability | **High** | Ship ladder; every tier boundary is a valid stop |
+| Middleware claim reads as one game with custom controls | Medium | T2 second host, or the integration snippet in §1 as the minimum defence |
+| One trial flips the recommendation | Medium | §5.1 adaptive trial count |
+| Gesture latency worse than touch | Medium | D3 — it *will* be. Report honestly; it is the tradeoff the recommender arbitrates |
+| Before/after confounded by practice | Medium | §5.4 calibration is the headline metric |
+| LLM API access unresolved | Medium | T1 is off the critical path; T0 does not depend on it |
 
 ---
 
 ## 12. Honesty and framing constraints
 
-Non-negotiable, applying to the code, the video and the writeup.
+Applies to code, video and deck.
 
-- One human input maps to one approved game action. No macros, no action sequences.
-- No aim assistance. No reading live game state for real-time input decisions.
+- One human input maps to one approved game action. No macros in real time.
+- **Channels differ in speed and reliability, never in capability (D16).** Every command reachable
+  by gesture is also reachable by touch.
+- No aim assistance. No reading live game state to make real-time input decisions.
 - Recognition runs **on-device**. Raw camera data never leaves the device.
 - Binding changes require explicit user approval, between rounds only.
-- **Never claim that simulated input noise proves accessibility effectiveness for real disabilities.**
+- **The recommender advises; it never blocks (D8).** Where a mapping is poorly suited, the cost
+  is quantified and the player still decides.
+- Channels claimed as *provided* are those that actually run — currently touch and hand gesture.
+  Face, tilt and sound are described as designed, not delivered.
+- **Never claim simulated input noise proves accessibility effectiveness for real disabilities.**
 - Use real traces. Describe scripted traces only as engineering stress tests.
-- Describe the calibration as **adaptive stopping, not a controlled trial.**
+- Describe calibration as **adaptive stopping, not a controlled trial**.
 - Framed as **publisher-integrated middleware**, not an unauthorised overlay.
-- Never say "swarm" for two teammates.
-- **Anything not shipped is presented as designed-not-shipped, with the schema or interface as
-  evidence.** Face input, sound, and the LLM all fall under this if they miss. Explicit
-  prioritisation reads as judgment; silence reads as abandonment.
-
-### Where the "AI" credit is
-The recommender is deliberately rule-based and explainable — the correct engineering call, since
-the product must justify its recommendations. The AI content is:
-1. **On-device ML gesture recognition** (MediaPipe) — lead with this.
-2. **LLM interpretation of natural-language tactical instructions**, constrained to a validated
-   schema (T3).
+- Anything unshipped is presented as **designed, not shipped**, with the interface as evidence.
+- Swarmfall is the demo host. The deck leads with the problem and the layer — a swarm game by
+  itself has no problem statement, and Problem–Solution Fit is 40%.
 
 ---
 
-## 13. Instructions for Codex
+## 13. Open questions
 
-For every task:
-1. Inspect the repository first.
-2. Explain the planned change before making it.
-3. Modify only the necessary files.
-4. Keep code modular and strictly typed.
-5. Run the build and fix all TypeScript errors.
-6. Do not add libraries without explaining why.
-7. Do not redesign unrelated working features.
-8. Summarise all changed files.
-9. **Stop after the requested tier. Do not implement future tiers early.**
-
-### Setup-phase request
-
-```text
-Scaffold a mobile-friendly Phaser 3 game in TypeScript with Vite.
-
-Deliver ONLY:
-
-1. Vite + TypeScript + Phaser 3.90.x, tsconfig strict: true
-2. .gitignore, Prettier config
-3. Phaser booting into an empty scene, Scale.FIT, responsive to viewport
-4. src/ui/layout.ts       exporting (width, height) => HUD anchor positions
-5. src/config/balance.ts  exporting all tuning constants (empty stub is fine)
-6. Types with minimal implementations:
-   - src/input/GameAction.ts     enum: MOVE, ABILITY, DODGE, SQUAD_FOLLOW, SQUAD_SPREAD
-   - src/input/InputSourceId.ts  enum: TOUCH_JOYSTICK, TOUCH_ABILITY, TOUCH_DODGE,
-                                 TOUCH_TACTIC, HAND_CLOSED_FIST, HAND_OPEN_PALM
-   - src/input/InputChannel.ts   interface: id, sources[], start(), stop(), isActive
-   - src/input/ActionBus.ts
-   - src/input/BindingMap.ts
-   - src/recommendation/RecommendationTypes.ts
-
-ARCHITECTURE REQUIREMENTS — these are the point of this task:
-
-a) BindingMap governs dispatch, not just configuration. An action emitted by a source
-   reaches listeners ONLY IF that source is currently bound to that action.
-
-b) Telemetry hooks are placed BEFORE the binding check, so emissions from unbound
-   sources are still recorded. Rejected emissions must be recorded, not discarded.
-   (Leave the recorder itself as a stub that logs to console.)
-
-c) ActionBus payloads are strongly typed per action via a mapped type:
-     MOVE             -> { x: number; y: number }
-     discrete actions -> { confidence?: number }
-   All payloads additionally carry { source: InputSourceId; timestamp: number }.
-
-d) InputSourceId (bindable signal) and InputChannelId (lifecycle owner: TOUCH,
-   HAND_VISION, FACE_VISION) are separate concepts. A channel owns several sources.
-
-e) Initial bindings:
-     MOVE -> TOUCH_JOYSTICK, ABILITY -> TOUCH_ABILITY,
-     DODGE -> TOUCH_DODGE, SQUAD_FOLLOW and SQUAD_SPREAD -> TOUCH_TACTIC
-
-f) Include a small non-game test (unit test or console script) proving:
-     - with ABILITY -> TOUCH_ABILITY: a TOUCH_ABILITY emission is dispatched,
-       a HAND_CLOSED_FIST emission is NOT
-     - after bindings.set(ABILITY, HAND_CLOSED_FIST): the reverse holds
-     - in BOTH configurations, BOTH emissions appear in telemetry
-
-Do NOT add: MediaPipe, gameplay logic, enemies, squad AI, scenes beyond the empty
-boot scene, art assets, or any LLM integration.
-Confirm `npm run build` passes with zero errors.
-```
-
----
-
-## 14. Open questions
-
-Resolved in earlier versions: trial count (adaptive 12→20), bias threshold (25% of button radius
-+ 60% same-side), false-activation measurement (dedicated no-cue window), round length (45–60 s /
-30 s demo), scope prioritisation (ship ladder), track allocation (§9).
+Resolved by the case brief: technology restrictions (none), deliverables (deck / code / video),
+judging weights (40/30/30), timeline.
 
 Still open:
 
-1. **Cue modality.** The calibration cue is currently a visual flash. Should it be audio, or both?
-   A visual cue competes for the attention the gesture input also needs, which may inflate gesture
-   latency relative to touch — a confound in the direction that flatters touch.
-2. **What the video leads with.** The recommendation moment (accept → rebind → it works) or the
-   refusal moment (Dodge stays on touch, and here is why)? The refusal is the more distinctive
-   claim but needs more setup to land in a short video.
-3. **Advisory-vs-implemented framing.** D14 ships layout findings as text only. Is there a
-   one-line framing that makes this read as appropriate caution rather than an unfinished feature?
-4. **Habit-persistence metric.** Rejected-emission counts ("the player reached for the old button
-   N times after rebinding") is a genuinely novel small metric. Worth surfacing in the demo, or a
-   distraction from the main comparison?
+1. **Cue modality.** The calibration cue is currently visual. A visual cue competes for the
+   attention the gesture channel also needs, which may inflate gesture latency relative to touch —
+   a confound in the direction that flatters touch. Audio cue, or both?
+3. **What the video leads with.** The recommendation moment (accept → rebind → it works) or the
+   caution moment (the layer quantifies what moving the lasso would cost, then lets the player
+   decide anyway)? The caution moment is more distinctive but needs more setup in a 5-minute video.
+4. **Does T2 get built?** Decide 5 August based on integration progress.

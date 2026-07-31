@@ -5,13 +5,25 @@
 
 ## 1. Overview
 
+The layer has two responsibilities:
+
+1. **Supplying input channels.** Touch controls and on-device hand gesture recognition are
+   implemented inside the layer, not inside any host game. A game adopting the layer gets these
+   channels without building a camera pipeline or integrating a model. The `InputChannel`
+   interface is designed to accept further channels (face blendshapes, device tilt, sound);
+   those are designed, not delivered.
+2. **Assigning channels to actions.** It measures per-player channel performance, recommends
+   a mapping, explains it, and applies it on approval.
+
 The system separates **input sources** from **game actions**. Nothing in a host game ever reads
 a pointer, a hand landmark or a sensor value directly. Input sources emit abstract actions; the
 game listens for them. A binding map decides which source currently drives which action, and
 that map can be changed at runtime.
 
 That indirection is the entire product. Moving an action from a touch button to a hand gesture
-is a one-line map mutation, not a code change.
+is a one-line map mutation, not a code change. Because every channel is owned by the layer, it
+can also guarantee capability parity across them — every action reachable by gesture is
+reachable by touch.
 
 ```
 packages/adaptive-input/     the layer   ─┐
@@ -64,10 +76,14 @@ recommender matches the two.
 
 ```ts
 interface ActionRequirements {
-  spatial: boolean;          // needs precise continuous positioning — not remappable
-  latencyCritical: boolean;  // must not tolerate added input latency
+  spatial: boolean;          // needs precise continuous positioning
+  latencyCritical: boolean;  // does not tolerate added input latency
 }
 ```
+
+These drive **warnings, not blocks**. An action whose requirements a channel serves poorly is
+not recommended for that channel, and if the player moves it anyway they are shown the measured
+cost first. The player always decides.
 
 ### Sources vs channels
 
@@ -119,8 +135,14 @@ A transparent rule set, not a trained model. Explainability is a requirement, no
 the product must justify its recommendations to the player before applying them.
 
 The recommender combines *declared* action requirements with *measured* channel capabilities. An
-action marked `spatial` or `latencyCritical` is never moved off touch, regardless of how well
-the player performs on an alternative channel — and the refusal is stated explicitly.
+action marked `spatial` or `latencyCritical` is not recommended for a channel that serves it
+poorly — but the player may override, and is shown the quantified cost before doing so:
+
+> *"Lasso accuracy: 91% on touch, 64% on gesture. Precision will drop. Move it anyway?"*
+
+The system informs; the player decides. Blocking a player from remapping their own controls
+would be the wrong posture for a product whose premise is that the player understands their own
+needs better than the game does.
 
 **TODO** — rule set, thresholds, explanation templates.
 
