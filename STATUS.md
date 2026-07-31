@@ -73,9 +73,9 @@ TouchControls · GestureInput · (FaceInput)                       ← parallel,
 
 | Role | Owns | Notes |
 |---|---|---|
-| **Core & Integration** | Swarmfall integration, then the pipeline | Needs familiarity with the Swarmfall codebase. Largest share, runs all week |
-| **Vision Input & Screens** | `GestureInput` (MediaPipe), then calibration + recommendation screens | Highest-risk single component — T0 fails without it |
-| **Touch Input & Quality** | `TouchControls` + telemetry, then tuning, device testing, demo script | Self-contained, but calibration cannot measure touch until it exists |
+| **Core & Integration** | Swarmfall integration, bus + gating, calibration harness, recommender, live rebind | Needs familiarity with the Swarmfall codebase. Largest share, runs all week |
+| **Vision Input & Screens** | `GestureInput` (MediaPipe), calibration + recommendation screens | Highest-risk single component — T0 fails without it |
+| **Touch Input & Quality** | `TouchTelemetry`, `InputScorer`, results screen, tuning, device testing, demo script | Swarmfall's buttons already exist — this role instruments them, doesn't build them |
 
 Everything is concurrent **after one merge** — the types with empty bodies. That is the only
 blocking dependency in the project.
@@ -88,15 +88,17 @@ role absorbs all three deliverables.
 ## First tasks
 
 **Core & Integration** — Merge `GameAction`, `InputSourceId`, `ActionBus`, `BindingMap`,
-`InputChannel` with empty bodies. Push immediately; it unblocks the other two roles. Then route
-Swarmfall's existing input through the bus and add `RECALL` + `HOLD`.
+`InputChannel` and the `InputScorer` output type, all with empty bodies. Push immediately; it
+unblocks the other two roles. Then route Swarmfall's existing `LASSO` and `SWITCH_TYPE` through
+the bus.
 
 **Vision Input** — Read [ARCHITECTURE.md](ARCHITECTURE.md) §2–3. Then `GestureInput`: camera
 permission, MediaPipe closed fist, confidence threshold, ~200 ms stability window, fire once,
 handle denial.
 
-**Touch Input** — `TouchControls`: on-screen buttons that emit actions through the bus, plus tap
-position and timing telemetry. Never call game code directly.
+**Touch Input** — `TouchTelemetry`: for each press on Swarmfall's existing buttons, record
+landing position, duration, distance from centre, drift and repeat taps. The buttons already
+exist; this instruments them.
 
 ---
 

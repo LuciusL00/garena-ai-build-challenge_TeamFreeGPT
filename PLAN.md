@@ -140,16 +140,19 @@ threats. Sixty-second rounds.
 
 ### Actions
 
-| Action | Requirements | Role |
-|---|---|---|
-| `LASSO` | `spatial: true` | Movement/territory indicator. Remappable, but **warned against with a quantified precision cost (D8)**. Already exists. |
-| `SELECT_TROOP_TYPE` | discrete | Toggle guards / harvesters |
-| `RECALL` | discrete, non-urgent | Primary remap candidate |
-| `HOLD` | discrete, non-urgent | Second remap candidate |
+Swarmfall already has both controls the thesis needs. **T0 requires no new gameplay features.**
 
-`RECALL` and `HOLD` are deliberately **declarative player intents** — return to core, stop and
-defend — with no reading of live game state. A command that inspected the world to pick its own
-target would be a macro, and that is the thing §12 rules out.
+| Action | Requirements | Role | Status |
+|---|---|---|---|
+| `LASSO` | `spatial: true` | Territory indicator. Remappable, but **warned against with a quantified precision cost (D8)** | exists |
+| `SWITCH_TYPE` | discrete, non-urgent | **The remap candidate** — miner / defender toggle | exists |
+| `RECALL`, `HOLD` | discrete, non-urgent | Extra remap candidates; more primitives for the T1 grammar | **optional, T3** |
+
+The demo is therefore *"closed fist switches between miners and defenders"* — no new game code.
+
+`RECALL` and `HOLD`, if added, are deliberately **declarative player intents** — return to core,
+stop and defend — with no reading of live game state. A command that inspected the world to pick
+its own target would be a macro, and that is what §12 rules out.
 
 **The 2–3 discrete commands must be added.** Without them there is nothing to measure or remap,
 and the thesis has no surface in this game. This is the one structural requirement of the
@@ -222,8 +225,10 @@ packages/
     │   ├── TouchControls.ts    channel                         [touch]
     │   ├── TouchTelemetry.ts   channel                         [touch]
     │   └── GestureInput.ts     channel                         [vision]
-    ├── calibration/         cue-response measurement           [core]
-    ├── recommendation/      InputScorer, ControlRecommender    [core]
+    ├── calibration/         cue-response harness               [core]
+    ├── recommendation/
+    │   ├── InputScorer.ts       samples → per-channel numbers  [touch]
+    │   └── ControlRecommender.ts  rules + explanations         [core]
     └── data/                SessionTelemetry, PlayerProfile    [core]
 
 demos/
@@ -427,10 +432,10 @@ explicitly rewards "prioritisation of trade-offs."
 
 | Date | **Core & Integration** | **Vision Input & Screens** | **Touch Input & Quality** |
 |---|---|---|---|
-| **1 Aug** | **Merge the types first**, before anything else. Then route Swarmfall's input through `ActionBus`, add `RECALL` + `HOLD` | Read the interface. Camera permission, MediaPipe loading | Read the interface. On-screen buttons emitting through the bus |
-| 2–3 Aug | `CalibrationScene` — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | `TouchTelemetry` — tap position, timing, drift, repeat taps |
-| 4–5 Aug | `InputScorer` + `ControlRecommender` — rules, explanation text, Accept/Reject, **live rebind** | Calibration and recommendation screens | Balance tuning, device test matrix, UI copy |
-| 6 Aug | Before/after aggregation | Before/after screen. **T1** LLM grammar if clear | Demo script written and timed |
+| **1 Aug** | **Merge the types first**, before anything else. Then route Swarmfall's existing `LASSO` and `SWITCH_TYPE` through `ActionBus` | Read the interface. Camera permission, MediaPipe loading | Read the interface. `TouchTelemetry` against Swarmfall's existing buttons |
+| 2–3 Aug | Calibration harness — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | `TouchTelemetry` complete; `InputScorer` — samples → per-channel numbers |
+| 4–5 Aug | `ControlRecommender` — rules, explanation text, Accept/Reject, **live rebind** | Calibration and recommendation screens | Results / before-after screen; balance tuning |
+| 6 Aug | Before/after aggregation | **T1** LLM grammar if clear | Device test matrix; demo script written and timed |
 | **7 Aug** | **Integration day — everyone.** Full flow end to end, repeatedly, no reload. **T0 complete** | | |
 | 8 Aug | **Freeze at noon.** Technical slides reviewed | Freeze at noon. Deck finalised | **Record video.** README, DISCLOSURE |
 | 9 Aug | Standby for blocking bugs | Submit. **No code** | Standby |
@@ -474,9 +479,15 @@ a complete spine is the entire demo.
 
 | Role | Owns | Rationale |
 |---|---|---|
-| **Core & Integration** | Swarmfall integration, then the **spine** — `ActionBus`, `BindingMap`, calibration, scorer, recommender | Integration requires familiarity with the Swarmfall codebase, so it goes wherever that knowledge already is. The spine is algorithmic and testable and needs no game-development experience. **This is the largest share of the product and it runs all week — not a setup task followed by a handoff.** |
+| **Core & Integration** | Swarmfall integration, then the **spine** — `ActionBus`, `BindingMap`, calibration harness, `ControlRecommender`, live rebind | Integration requires familiarity with the Swarmfall codebase, so it goes wherever that knowledge already is. The spine is algorithmic and testable and needs no game-development experience. **This is the largest share of the product and it runs all week — not a setup task followed by a handoff.** |
 | **Vision Input & Screens** | `GestureInput` (MediaPipe), then the calibration and recommendation screens | The highest-risk single component in the project: T0 fails without a working alternative channel. Allocate accordingly. |
-| **Touch Input & Quality** | `TouchControls` + `TouchTelemetry`, then balance tuning, device testing, demo script | Self-contained and lower risk, but load-bearing — calibration cannot measure touch until it exists. Also owns tuning, which nothing else on the schedule makes time for. |
+| **Touch Input & Quality** | `TouchTelemetry`, **`InputScorer`** (samples → numbers, all channels), results screen, tuning, device testing, demo script | Swarmfall's buttons already exist, so this role instruments them rather than building them. `InputScorer` moves here to take one item off the serial critical path: it is pure data transformation with a clean contract, and this role already derives touch-specific summaries. |
+
+**Why `InputScorer` sits outside Core.** Core is the bottleneck — every stage of the spine
+depends on the previous one. `InputScorer` has no coupling to the harness internals, so moving it
+off shortens the serial chain. The dependency is handled by the same day-one trick: **Core defines
+the scorer's output type in the types merge**, codes the recommender against that type
+immediately, and stubs it with fixed numbers if the implementation runs late.
 
 **Deliverables.** Deck content goes wherever the thesis is best understood, with technical slides
 reviewed by Core. Device testing, the demo script and raw recording sit with Touch Input &
