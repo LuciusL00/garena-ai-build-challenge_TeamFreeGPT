@@ -2,7 +2,18 @@
 
 **1 August 2026 · build until 8 Aug, submit 9 Aug**
 
-Spec is in [PLAN.md](PLAN.md). This is just where we are and who does what.
+Spec is in [PLAN.md](PLAN.md). Unconfirmed assumptions and open questions are in
+[CONSIDERATIONS.md](CONSIDERATIONS.md). This is just where we are and who does what.
+
+---
+
+## Rules
+
+- Branch per person, PR **merged same day**
+- `git pull` on `main` before starting each day
+- Never two people in one file
+- Update [DISCLOSURE.md](DISCLOSURE.md) when you add a dependency
+- Don't add scope because something finished early
 
 ---
 
@@ -118,17 +129,6 @@ Reasoning in [PLAN.md](PLAN.md) §2.
 
 ---
 
-## Open items
-
-| Item | By |
-|---|---|
-| Swarmfall source into repo | 1 Aug |
-| Which gesture → which command | 3 Aug |
-| Does T2 get built? | 5 Aug |
-| LLM API access — awaiting Garena | 5 Aug |
-
----
-
 ## Submission checklist
 
 Email `outreachsg@garena.com` with a Google Drive link, folder named after the team.
@@ -142,13 +142,3 @@ Email `outreachsg@garena.com` with a Google Drive link, folder named after the t
 - [ ] Repo link inside the Drive folder
 
 **Judging:** Problem–Solution Fit 40% · Build Quality 30% · Originality 30%.
-
----
-
-## Rules
-
-- Branch per person, PR **merged same day**
-- `git pull` on `main` before starting each day
-- Never two people in one file
-- Update [DISCLOSURE.md](DISCLOSURE.md) when you add a dependency
-- Don't add scope because something finished early

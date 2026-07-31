@@ -234,13 +234,47 @@ much smaller claim, and Problem–Solution Fit is 40% of the score.
 **For:** it was prominent in the submitted proposal, and it is the most legible AI feature to a
 non-technical judge. MediaPipe can be read as "an imported library."
 
-**Against:** it is not needed for the core thesis, and API access is still unresolved.
+**Against:** it is not needed for the core thesis, and we now supply the model ourselves (C3).
 
 **Confirm by:** 6 Aug.
 
 ---
 
-### C3. Is one gesture enough?
+### C3. Which model do we use? Garena provides no API access
+**Confirmed:** Garena is not providing API access or credits. Teams supply their own. The brief
+places no restriction on which model is used.
+
+**Assumed:** a free tier is sufficient. Our usage is tiny — a handful of calls per demo run,
+between rounds, never in real time.
+
+**Requirements:**
+- Free at our volume, without a credit card if possible
+- **Structured output** — the grammar (§6 of the plan) needs the model to return a fixed schema.
+  An API that enforces the schema is far better than one where we hope the model complies and
+  parse defensively
+- A key that never reaches client code, so a serverless function is needed regardless of provider
+  (Vercel's free tier covers this)
+
+**Options:**
+
+| Option | Notes |
+|---|---|
+| **Google Gemini free tier** | Native structured output via `responseSchema` — the API enforces the shape rather than us hoping for it. Generous free limits. **Recommended default.** |
+| Groq free tier | Very fast, runs open models, has a JSON mode. Good if latency matters, but schema enforcement is weaker |
+| OpenRouter / Together / Cerebras free tiers | Similar; limits and availability vary |
+| In-browser model (WebLLM, Transformers.js) | No key, no backend, and it would extend the on-device privacy story to the whole product. But a 1–2 GB download and unreliable schema adherence on a phone. **Not viable for a mobile demo** |
+
+**Recommendation:** Gemini free tier, chosen specifically because native schema enforcement does
+the validation work the grammar depends on. We still validate server-side against the allowlist —
+the API constraint is a first line, not the only one.
+
+**Whichever is chosen must be recorded in [DISCLOSURE.md](DISCLOSURE.md).**
+
+**Confirm by:** 5 Aug, before T1 starts.
+
+---
+
+### C4. Is one gesture enough?
 **Assumed:** yes for T0. Extra gestures are polish.
 
 **Risk:** a single gesture may look thin on video. One that works reliably beats three that fire
@@ -294,3 +328,5 @@ eats the integration day.
 | What are the deliverables? | Deck (15 pp) · private repo + collaborator · video (5 min) | Case brief |
 | Judging weights | Problem–Solution Fit 40% · Build Quality 30% · Originality 30% | Case brief |
 | Does Swarmfall need new commands for T0? | No — `LASSO` and `SWITCH_TYPE` already exist | Team |
+| Does Garena provide LLM API access or credits? | **No.** Teams supply their own — see C3 | Garena |
+| Which gesture maps to which command? | Vision Input role decides empirically | Team |
