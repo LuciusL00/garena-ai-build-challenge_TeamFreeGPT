@@ -16,7 +16,7 @@
 | Submission | **9 August 2026** — deck, source code, video |
 | Finalists announced | 13 August · Final presentations 23 August |
 | Team | 3 members, full team from 1 August |
-| Toolchain | Node 22, Vite, TypeScript, Phaser, MediaPipe |
+| Toolchain | Node 22, Vite, TypeScript, MediaPipe |
 
 ### Judging weights
 
@@ -232,8 +232,7 @@ packages/
     └── data/                SessionTelemetry, PlayerProfile    [core]
 
 demos/
-├── swarmfall/               host 1 — the demo                  [core]
-└── survivor/                host 2 — portability proof (T2)
+└── swarmfall/               the demo                           [core]
 ```
 
 `packages/adaptive-input/` must never import from `demos/` (D9).
@@ -241,7 +240,7 @@ demos/
 ### 4.4 Stack
 
 ```text
-TypeScript (strict) · Vite · Phaser 3.90.x · @mediapipe/tasks-vision
+TypeScript (strict) · Vite · @mediapipe/tasks-vision
 Vercel or Netlify, auto-deploy from main
 ```
 
@@ -408,8 +407,8 @@ function, a fetch, an allowlist check. This tier is what "genuine use of AI-driv
 in the 30% Build Quality criterion is asking for.
 
 ### T2 — Portability proof
-Second demo host: the survivor game cut to the bone — arena, movement, one enemy, one ability.
-Turns the middleware claim from asserted to demonstrated. Pre-empts the obvious judge objection:
+Second demo host, if time permits, would provide the portability proof. It turns the middleware
+claim from asserted to demonstrated and pre-empts the obvious judge objection:
 *"you built one game with custom controls and called it a platform."* ~1.5 days, conditional on
 Swarmfall integration going smoothly.
 

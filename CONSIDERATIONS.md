@@ -22,7 +22,7 @@ Ordered by how much damage a wrong answer does.
 a builder platform and exports as unreadable generated output, this is submission-blocking, not
 inconvenient.
 
-**If wrong:** rebuild a minimal host from scratch, or fall back to the survivor demo. Days of work.
+**If wrong:** rebuild a minimal host from scratch. Days of work.
 
 **Confirm by:** immediately.
 

@@ -41,8 +41,7 @@ packages/
                         calibration, recommendation engine
 
 demos/
-├── swarmfall/          host 1 — real-time swarm control game
-└── survivor/           host 2 — top-down survivor (portability demonstration)
+└── swarmfall/          real-time swarm control game
 ```
 
 **Rule:** `packages/adaptive-input/` must never import from `demos/`. The dependency runs one

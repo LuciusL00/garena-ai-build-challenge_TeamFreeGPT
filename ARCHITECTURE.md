@@ -28,7 +28,7 @@ reachable by touch.
 ```
 packages/adaptive-input/     the layer   ─┐
                                           ├─ one-way dependency
-demos/swarmfall/  demos/survivor/   hosts ─┘
+demos/swarmfall/                  host ─┘
 ```
 
 The layer never imports from a host. Hosts import the layer.
