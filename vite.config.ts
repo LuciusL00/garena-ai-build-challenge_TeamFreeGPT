@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [
-    vinext(),
+    vinext({ nextConfig: { output: 'export' } }),
     cloudflare({
       viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
     }),
