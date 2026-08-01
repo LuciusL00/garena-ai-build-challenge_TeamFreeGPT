@@ -12,6 +12,10 @@ models, datasets and APIs used in this project.
 | Phaser | 3.90.x | MIT | 2D game engine — rendering, physics, scene management |
 | Vite | 8.x | MIT | Build tooling and development server |
 | TypeScript | 6.x | Apache-2.0 | Language and type checking |
+| React | 19.2.x | MIT | Client shell for the Sites-compatible Swarmfall deployment |
+| Vinext | 1.0.0-beta.4 | MIT | Vite-based Pages Router build and server bundle for Sites deployment |
+| React Server DOM Webpack | 19.2.x | MIT | Vinext server-rendered build runtime |
+| Vite React / RSC plugins | 5.1.x / 0.5.x | MIT | Vinext React and server-component build integration |
 
 ## Models
 
