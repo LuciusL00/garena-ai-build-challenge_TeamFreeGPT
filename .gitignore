@@ -4,6 +4,7 @@ build/
 .vite/
 .next/
 next-env.d.ts
+.wrangler/
 
 # environment / secrets — never commit these
 .env

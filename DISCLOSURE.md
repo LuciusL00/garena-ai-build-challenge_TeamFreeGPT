@@ -16,6 +16,7 @@ models, datasets and APIs used in this project.
 | Vinext | 1.0.0-beta.4 | MIT | Vite-based Pages Router build and server bundle for Sites deployment |
 | React Server DOM Webpack | 19.2.x | MIT | Vinext server-rendered build runtime |
 | Vite React / RSC plugins | 5.1.x / 0.5.x | MIT | Vinext React and server-component build integration |
+| Cloudflare Vite plugin | 1.50.0 | MIT | Runs the Vinext RSC/SSR environments in the Cloudflare Worker runtime used by Sites |
 
 ## Models
 
