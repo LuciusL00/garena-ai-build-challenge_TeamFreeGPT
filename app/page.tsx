@@ -1,11 +1,5 @@
-'use client';
-
-import { useEffect } from 'react';
+import SwarmfallClient from './swarmfall-client';
 
 export default function SwarmfallPage() {
-  useEffect(() => {
-    void import('../demos/swarmfall/src/main.ts');
-  }, []);
-
-  return <div id="app" />;
+  return <SwarmfallClient />;
 }
