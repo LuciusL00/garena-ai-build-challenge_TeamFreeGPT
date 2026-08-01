@@ -628,11 +628,12 @@ class SwarmfallGame {
 
       for (const asteroid of this.state.asteroids) {
         if (distance(harvester.position, asteroid.position) > BALANCE.unitRadius + asteroid.radius) continue;
-        if (harvester.cargo <= 0) continue;
-        harvester.cargo = 0;
+        if (harvester.impactCooldown > 0) continue;
         const away = normalized({ x: harvester.position.x - asteroid.position.x, y: harvester.position.y - asteroid.position.y });
-        harvester.velocity.x += away.x * 70;
-        harvester.velocity.y += away.y * 70;
+        if (harvester.cargo > 0) harvester.cargo = 0;
+        harvester.velocity.x += away.x * BALANCE.harvesterImpactForce;
+        harvester.velocity.y += away.y * BALANCE.harvesterImpactForce;
+        harvester.impactCooldown = BALANCE.asteroidHitCooldown;
         harvester.flash = 0.24;
         addEffect(this.state, harvester.position, '#61d7d7', 22);
       }

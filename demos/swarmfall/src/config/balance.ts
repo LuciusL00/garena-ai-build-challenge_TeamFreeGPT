@@ -38,6 +38,7 @@ export const BALANCE = {
   harvesterCargoCapacity: 24,
   cargoBankRadius: 39,
   asteroidHarvesterLoss: 0.8,
+  harvesterImpactForce: 70,
   effectSeconds: 0.32,
   gridSize: 32,
 } as const;
