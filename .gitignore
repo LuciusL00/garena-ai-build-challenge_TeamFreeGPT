@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 .vite/
+.next/
+next-env.d.ts
 
 # environment / secrets — never commit these
 .env
