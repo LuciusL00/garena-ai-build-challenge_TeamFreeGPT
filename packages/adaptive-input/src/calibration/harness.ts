@@ -1,6 +1,6 @@
 /** Channel-neutral cue/response calibration, adapted from Vivin's prototype. */
 
-import type { ActionId } from '../actions.ts';
+import type { ActionId, CalibrationTask } from '../actions.ts';
 import {
   channelOf,
   type InputSignal,
@@ -10,7 +10,6 @@ import {
 import {
   ANTICIPATION_FLOOR_MS,
   CUE_DELAY_RANGE_MS,
-  NO_CUE_WINDOW_MS,
   RESPONSE_TIMEOUT_MS,
   TRIALS_INITIAL,
   type CalibrationSession,
@@ -55,18 +54,17 @@ export interface CalibrationHarnessConfig {
   readonly trialCount: number;
   readonly cueDelayRangeMs: readonly [number, number];
   readonly responseTimeoutMs: number;
-  readonly noCueWindowMs: number;
 }
 
 export const DEFAULT_CALIBRATION_HARNESS_CONFIG: CalibrationHarnessConfig = {
   trialCount: TRIALS_INITIAL,
   cueDelayRangeMs: CUE_DELAY_RANGE_MS,
   responseTimeoutMs: RESPONSE_TIMEOUT_MS,
-  noCueWindowMs: NO_CUE_WINDOW_MS,
 };
 
 export interface CalibrationRunRequest<A extends ActionId> {
   readonly sessionId: string;
+  readonly task: CalibrationTask;
   readonly action: A;
   readonly source: CalibrationSource;
 }
@@ -75,7 +73,6 @@ export interface CalibrationHarnessCallbacks<A extends ActionId> {
   onWaiting?(trialIndex: number): void;
   onCue?(trialIndex: number, cueAt: number): void;
   onTrial?(trial: CalibrationTrial<A>): void;
-  onNoCueWindow?(startedAt: number): void;
 }
 
 /**
@@ -102,12 +99,13 @@ export class CalibrationHarness {
 
     const session: CalibrationSession<A> = {
       id: request.sessionId,
+      task: request.task,
       channelUnderTest: channelOf(request.source.source),
+      sourceUnderTest: request.source.source,
       action: request.action,
       startedAt: this.clock.now(),
       trials: [],
       falseActivations: [],
-      noCueWindowMs: config.noCueWindowMs,
     };
 
     for (
@@ -127,16 +125,6 @@ export class CalibrationHarness {
       if (!trial) break;
       session.trials.push(trial);
       callbacks.onTrial?.(trial);
-    }
-
-    if (!this.aborted && config.noCueWindowMs > 0) {
-      await this.runNoCueWindow(
-        request.action,
-        request.source,
-        session.falseActivations,
-        callbacks,
-        config.noCueWindowMs,
-      );
     }
 
     this.activeCleanup?.();
@@ -164,6 +152,7 @@ export class CalibrationHarness {
       let responseTimer: ReturnType<typeof setTimeout> | null = null;
       let settled = false;
       let unsubscribe: () => void = () => undefined;
+      const waitingStartedAt = this.clock.now();
 
       const settle = (trial: CalibrationTrial<A> | null): void => {
         if (settled) return;
@@ -183,7 +172,7 @@ export class CalibrationHarness {
             source: signal.source,
             timestamp: signal.timestamp,
             confidence: signal.confidence,
-            context: 'pre-cue',
+            context: 'waiting',
           });
           return;
         }
@@ -192,6 +181,7 @@ export class CalibrationHarness {
         settle({
           trialIndex,
           action,
+          waitingStartedAt,
           cueAt,
           respondedAt: signal.timestamp,
           latencyMs,
@@ -223,6 +213,7 @@ export class CalibrationHarness {
           settle({
             trialIndex,
             action,
+            waitingStartedAt,
             cueAt,
             respondedAt: null,
             latencyMs: null,
@@ -233,46 +224,6 @@ export class CalibrationHarness {
         }, config.responseTimeoutMs);
         callbacks.onCue?.(trialIndex, cueAt);
       }, cueDelay);
-    });
-  }
-
-  private runNoCueWindow<A extends ActionId>(
-    action: A,
-    source: CalibrationSource,
-    falseActivations: FalseActivation<A>[],
-    callbacks: CalibrationHarnessCallbacks<A>,
-    durationMs: number,
-  ): Promise<void> {
-    return new Promise((resolve) => {
-      let settled = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let unsubscribe: () => void = () => undefined;
-
-      const settle = (): void => {
-        if (settled) return;
-        settled = true;
-        if (timer !== null) clearTimeout(timer);
-        unsubscribe();
-        this.activeCleanup = null;
-        resolve();
-      };
-
-      const registeredUnsubscribe = source.subscribe((signal) => {
-        if (signal.source !== source.source) return;
-        falseActivations.push({
-          action,
-          source: signal.source,
-          timestamp: signal.timestamp,
-          confidence: signal.confidence,
-          context: 'no-cue-window',
-        });
-      });
-      if (settled) registeredUnsubscribe();
-      else unsubscribe = registeredUnsubscribe;
-
-      timer = setTimeout(settle, durationMs);
-      this.activeCleanup = settle;
-      callbacks.onNoCueWindow?.(this.clock.now());
     });
   }
 
@@ -293,9 +244,6 @@ export class CalibrationHarness {
     }
     if (config.responseTimeoutMs <= 0) {
       throw new Error('responseTimeoutMs must be positive.');
-    }
-    if (config.noCueWindowMs < 0) {
-      throw new Error('noCueWindowMs cannot be negative.');
     }
     return config;
   }

@@ -11,10 +11,15 @@ import type { InputSourceId } from './sources.ts';
 /** Base type used by game-independent records and persisted data. */
 export type ActionId = string;
 
+/** Neutral calibration shapes. They describe input data, never game meaning. */
+export type CalibrationTask = 'TRIGGER' | 'DIRECTION' | 'POINT';
+
 /** The exact string action names declared by one host game's payload map. */
 export type ActionKey<M extends object> = Extract<keyof M, string>;
 
 export interface ActionRequirements {
+  /** Selects the reusable player benchmark relevant to this action. */
+  task: CalibrationTask;
   /** Needs precise continuous positioning, such as drawing a lasso. */
   spatial: boolean;
   /** Does not tolerate meaningful added input latency. */
@@ -34,6 +39,7 @@ export interface ActionDescriptor<
 }
 
 export const DEFAULT_REQUIREMENTS: ActionRequirements = {
+  task: 'TRIGGER',
   spatial: false,
   latencyCritical: false,
 };

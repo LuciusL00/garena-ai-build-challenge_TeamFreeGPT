@@ -5,6 +5,7 @@ export type {
   ActionKey,
   ActionRequirements,
   ActionDescriptor,
+  CalibrationTask,
 } from './actions.ts';
 export { DEFAULT_REQUIREMENTS } from './actions.ts';
 
@@ -37,4 +38,7 @@ export type {
 
 export * from './calibration/types.ts';
 export * from './calibration/harness.ts';
+export * from './calibration/scoreCalibration.ts';
+export * from './profile.ts';
 export * from './recommendation/types.ts';
+export * from './recommendation/recommender.ts';

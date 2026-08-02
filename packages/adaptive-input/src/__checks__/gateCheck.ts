@@ -2,11 +2,20 @@
 
 import {
   AdaptiveInput,
+  CalibrationProfile,
+  CalibrationProfileStore,
   ChannelManager,
+  ControlRecommender,
   InputChannelId,
   InputSourceId,
+  scoreCalibration,
 } from '../index.ts';
-import type { ChannelContext, InputChannel } from '../index.ts';
+import type {
+  CalibrationSession,
+  ChannelContext,
+  InputChannel,
+  ProfileStorage,
+} from '../index.ts';
 
 type EmptyPayload = Record<string, never>;
 
@@ -67,36 +76,52 @@ class FakeChannel implements InputChannel {
   }
 }
 
+class MemoryProfileStorage implements ProfileStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+}
+
 async function main(): Promise<void> {
   const adaptive = new AdaptiveInput<TestActions>();
   adaptive.registerActions([
     {
       id: 'BEGIN_ROUND',
-      requirements: { spatial: false, latencyCritical: false },
+      requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
       defaultSource: InputSourceId.TOUCH_BUTTON,
       remappable: false,
     },
     {
       id: 'RESTART_ROUND',
-      requirements: { spatial: false, latencyCritical: false },
+      requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
       defaultSource: InputSourceId.TOUCH_BUTTON,
       remappable: false,
     },
     {
       id: 'TOGGLE_SQUAD',
-      requirements: { spatial: false, latencyCritical: false },
+      requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
       defaultSource: InputSourceId.TOUCH_BUTTON,
       remappable: true,
     },
     {
       id: 'LASSO_START',
-      requirements: { spatial: true, latencyCritical: false },
+      requirements: { task: 'POINT', spatial: true, latencyCritical: false },
       defaultSource: InputSourceId.TOUCH_POINTER,
       remappable: false,
     },
     {
       id: 'LASSO_END',
-      requirements: { spatial: true, latencyCritical: false },
+      requirements: { task: 'POINT', spatial: true, latencyCritical: false },
       defaultSource: InputSourceId.TOUCH_POINTER,
       remappable: false,
     },
@@ -185,6 +210,184 @@ async function main(): Promise<void> {
   check('unused vision channel stops after rebind', !hand.isActive && hand.stopCount === 1);
   check('original touch channel remains active', touch.isActive);
   await manager.stopAll();
+
+  console.log('\nCalibration score and profile memory');
+  const touchSession: CalibrationSession<'TOGGLE_SQUAD'> = {
+    id: 'touch-trigger',
+    task: 'TRIGGER',
+    channelUnderTest: InputChannelId.TOUCH,
+    sourceUnderTest: InputSourceId.TOUCH_BUTTON,
+    action: 'TOGGLE_SQUAD',
+    startedAt: 1_000,
+    trials: [
+      {
+        trialIndex: 0,
+        action: 'TOGGLE_SQUAD',
+        waitingStartedAt: -6_500,
+        cueAt: 1_000,
+        respondedAt: 1_200,
+        latencyMs: 200,
+        source: InputSourceId.TOUCH_BUTTON,
+        outcome: 'success',
+        extraActivations: 0,
+      },
+      {
+        trialIndex: 1,
+        action: 'TOGGLE_SQUAD',
+        waitingStartedAt: -5_500,
+        cueAt: 2_000,
+        respondedAt: 2_400,
+        latencyMs: 400,
+        source: InputSourceId.TOUCH_BUTTON,
+        outcome: 'success',
+        extraActivations: 0,
+      },
+      {
+        trialIndex: 2,
+        action: 'TOGGLE_SQUAD',
+        waitingStartedAt: -4_500,
+        cueAt: 3_000,
+        respondedAt: null,
+        latencyMs: null,
+        source: null,
+        outcome: 'miss',
+        extraActivations: 0,
+      },
+      {
+        trialIndex: 3,
+        action: 'TOGGLE_SQUAD',
+        waitingStartedAt: -3_500,
+        cueAt: 4_000,
+        respondedAt: null,
+        latencyMs: null,
+        source: null,
+        outcome: 'miss',
+        extraActivations: 0,
+      },
+    ],
+    falseActivations: [
+      {
+        action: 'TOGGLE_SQUAD',
+        source: InputSourceId.TOUCH_BUTTON,
+        timestamp: 500,
+        context: 'waiting',
+      },
+    ],
+  };
+  const fistSession: CalibrationSession<'TOGGLE_SQUAD'> = {
+    ...touchSession,
+    id: 'fist-trigger',
+    channelUnderTest: InputChannelId.HAND_VISION,
+    sourceUnderTest: InputSourceId.HAND_CLOSED_FIST,
+    trials: [600, 620, 640, 660].map((latencyMs, trialIndex) => ({
+      trialIndex,
+      action: 'TOGGLE_SQUAD' as const,
+      waitingStartedAt: 2_500 + trialIndex * 1_000,
+      cueAt: 10_000 + trialIndex * 1_000,
+      respondedAt: 10_000 + trialIndex * 1_000 + latencyMs,
+      latencyMs,
+      source: InputSourceId.HAND_CLOSED_FIST,
+      confidence: 0.95,
+      outcome: 'success' as const,
+      extraActivations: 0,
+    })),
+    falseActivations: [],
+  };
+  const touchScore = scoreCalibration(touchSession, 50_000);
+  const fistScore = scoreCalibration(fistSession, 50_100);
+  check('existing summary becomes a reusable success score', touchScore.successRate === 0.5);
+  check('even-sized latency list uses the standard median', touchScore.medianLatencyMs === 300);
+  check('WAIT activation is retained in the score', touchScore.falseActivationCount === 1);
+  check('WAIT duration becomes the false-activation denominator', touchScore.falseActivationObservationMs === 30_000);
+  check('WAIT count becomes a per-minute estimate', touchScore.falseActivationsPerMinute === 2);
+
+  const profile = new CalibrationProfile([touchScore, fistScore]);
+  check(
+    'trigger touch score is remembered by task and source',
+    profile.get('TRIGGER', InputSourceId.TOUCH_BUTTON)?.successRate === 0.5,
+  );
+  check(
+    'trigger score is not reused as a direction score',
+    profile.get('DIRECTION', InputSourceId.TOUCH_BUTTON) === undefined,
+  );
+  const profileStorage = new CalibrationProfileStore(new MemoryProfileStorage());
+  profileStorage.save(profile);
+  const restoredProfile = profileStorage.load();
+  check(
+    'profile scores survive save and load',
+    restoredProfile.get('TRIGGER', InputSourceId.HAND_CLOSED_FIST)?.successRate === 1,
+  );
+
+  console.log('\nRule-based recommendation');
+  const recommender = new ControlRecommender();
+  const request = {
+    action: 'TOGGLE_SQUAD' as const,
+    requirements: { task: 'TRIGGER' as const, spatial: false, latencyCritical: false },
+    currentSource: InputSourceId.TOUCH_BUTTON,
+    alternativeSource: InputSourceId.HAND_CLOSED_FIST,
+  };
+  const clearlyBetterProfile = new CalibrationProfile([
+    { ...touchScore, medianLatencyMs: 800 },
+    fistScore,
+  ]);
+  check(
+    'alternative dominance recommends the alternative',
+    recommender.recommend(request, clearlyBetterProfile).verdict === 'swap',
+  );
+  const incompleteProfile = new CalibrationProfile([touchScore]);
+  check(
+    'missing alternative result requests calibration',
+    recommender.recommend(request, incompleteProfile).verdict === 'needs-calibration',
+  );
+  check(
+    'faster touch versus more reliable fist stays a visible trade-off',
+    recommender.recommend(request, restoredProfile).verdict === 'trade-off',
+  );
+  const weakerAlternativeProfile = new CalibrationProfile([
+    touchScore,
+    {
+      ...fistScore,
+      successCount: 1,
+      successRate: 0.25,
+      medianLatencyMs: 900,
+      falseActivationCount: 2,
+      falseActivationsPerMinute: 4,
+    },
+  ]);
+  check(
+    'current dominance keeps the original source',
+    recommender.recommend(request, weakerAlternativeProfile).verdict === 'keep',
+  );
+  const similarProfile = new CalibrationProfile([
+    touchScore,
+    {
+      ...touchScore,
+      channel: InputChannelId.HAND_VISION,
+      source: InputSourceId.HAND_CLOSED_FIST,
+    },
+  ]);
+  check(
+    'similar measurements keep the original without inventing a winner',
+    recommender.recommend(request, similarProfile).verdict === 'keep',
+  );
+  const lowSuccessProfile = new CalibrationProfile([
+    { ...touchScore, successCount: 1, successRate: 0.25 },
+    { ...fistScore, successCount: 1, successRate: 0.25 },
+  ]);
+  check(
+    'two low-success controls request a retest',
+    recommender.recommend(request, lowSuccessProfile).verdict === 'retest',
+  );
+  check(
+    'latency-critical metadata does not automatically reject a measured winner',
+    recommender.recommend(
+      {
+        ...request,
+        requirements: { task: 'TRIGGER', spatial: false, latencyCritical: true },
+      },
+      clearlyBetterProfile,
+    ).verdict === 'swap',
+  );
 
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);

@@ -29,14 +29,14 @@ adaptive-input layer is the product.
 
 | Status | Item |
 |---|---|
-| Pushed for review | Lucius's portable core skeleton on `core/adaptive-input-skeleton` at `d0632f7`: typed actions, defaults, binding gate, pre-gate telemetry and channel lifecycle |
+| Pushed for review | Lucius's portable core skeleton on `core/adaptive-input-skeleton`: typed actions, defaults, binding gate, pre-gate telemetry, channel lifecycle and shared calibration harness |
 | Pushed prototype | Vivin's cleaned source on `vision/calibration-prototype` at `b910147` |
 | Manually checked | Vivin's browser prototype detects a closed fist and reports a live point vector |
 | Local review change | Lucius's fallback Swarmfall now uses continuous directional control: release stops; switching squads transfers the active direction |
-| Local dependency change | MediaPipe Tasks Vision `0.10.35` is installed and the repository build passes; the package files are not yet committed |
+| Feature branch | Neutral task scores, persistent calibration profile and comparison-first recommendations on `core/adaptive-input-skeleton` pass executable checks; `/calibration` compares touch/fist using 6-trial demo or 12-trial full modes and counts WAIT activations |
 | Pending | Mark exports the canonical Swarmfall source and publishes the real action/payload table |
 | Pending | Vivin's detector is ported behind the middleware `InputChannel` contract |
-| Pending | Touch and fist run through identical calibration, scorer, recommendation, approval, live rebind and before/after validation |
+| Pending | Review the calibration integration, then add approval, live rebind and before/after validation |
 | Pending | Real-phone HTTPS testing, camera-denial fallback and final integration |
 
 The local directional host is a temporary test object while Mark is unavailable. It must not be

@@ -41,19 +41,19 @@ const adaptive = new AdaptiveInput<HostActions>();
 adaptive.registerActions([
   {
     id: 'BEGIN_ROUND',
-    requirements: { spatial: false, latencyCritical: false },
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
     remappable: false,
   },
   {
     id: 'RESTART_ROUND',
-    requirements: { spatial: false, latencyCritical: false },
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
     remappable: false,
   },
   {
     id: 'TOGGLE_SQUAD',
-    requirements: { spatial: false, latencyCritical: false },
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
     remappable: true,
   },
@@ -80,6 +80,10 @@ context.emit({
   confidence: 0.92,
 });
 ```
+
+`task` describes only the neutral input shape: `TRIGGER`, `DIRECTION`, or `POINT`. Calibration
+scores are stored by task and input source, so one recent touch-trigger score can support several
+button-like actions without teaching the middleware what those actions mean in the game.
 
 The host-owned adapter supplies the action and payload:
 

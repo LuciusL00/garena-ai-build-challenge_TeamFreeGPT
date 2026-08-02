@@ -86,9 +86,9 @@ What a developer writes to adopt the layer:
 adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
 
 adaptive.registerActions([
-  { id: 'ACTIVATE_STRATEGY', requirements: { spatial: false, latencyCritical: false } },
-  { id: 'BEGIN_ROUND',       requirements: { spatial: false, latencyCritical: false } },
-  { id: 'RESTART_ROUND',     requirements: { spatial: false, latencyCritical: false } },
+  { id: 'ACTIVATE_STRATEGY', requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false } },
+  { id: 'BEGIN_ROUND',       requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false } },
+  { id: 'RESTART_ROUND',     requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false } },
 ]);
 
 adaptive.on('ACTIVATE_STRATEGY', () => game.activateSelectedStrategy());
@@ -232,10 +232,11 @@ packages/
     │   ├── TouchControls.ts    channel                         [touch]
     │   ├── WebTouchInput.ts    web channel                     [core/touch]
     │   └── GestureInput.ts     channel                         [vision]
-    ├── calibration/         cue-response harness               [core]
+    ├── calibration/
+    │   ├── harness.ts          cue-response harness            [core]
+    │   └── scoreCalibration.ts existing summary → score        [core]
     ├── recommendation/
-    │   ├── InputScorer.ts       samples → per-channel numbers  [core]
-    │   └── ControlRecommender.ts  rules + explanations         [core]
+    │   └── ControlRecommender.ts rules + explanations          [core]
     └── data/                SessionTelemetry, PlayerProfile    [core]
 
 demos/
@@ -268,23 +269,19 @@ A prompted cue-response trial per channel:
 2. The player responds on the channel under test.
 3. Outcome and timing recorded.
 
-**Adaptive trial count.** A fixed 12 is too fragile — one trial moves the success rate by 8.3
-points, so 9/12 (75%) and 10/12 (83%) straddle an 80% threshold.
+**Two presentation modes.** The live demo defaults to a six-trial quick estimate so both channels
+can be shown without stalling the presentation. The full check uses 12 trials. The UI reports the
+actual count and labels six-trial results as estimates; neither mode is presented as a clinical or
+controlled study.
 
 ```text
-Run 12 trials.
-IF the two channels differ by >= 15 percentage points → stop.
-ELSE run 8 more (20 total).
-Recorded evaluation sessions always use 20.
+Quick demo: 6 trials per channel.
+Full check: 12 trials per channel.
 ```
 
-Report the actual trial count on screen. Describe as **adaptive stopping, not a controlled
-trial** — optional stopping inflates false-positive rates, acceptable for a prototype but not to
-be written up as a study.
-
-**Dedicated false-activation window.** After the trials, a **20–30 s no-cue period** where the
-player waits without performing the tested action. Inter-trial gaps are too short and the player
-is anticipating the next cue.
+**False-activation observation.** Every random WAIT period before a cue is negative observation
+time. Any activation during WAIT is counted and shown with both its raw count and the observed
+duration. There is no separate, predictable "do nothing" stage.
 
 ### 5.2 Metrics
 
@@ -292,31 +289,27 @@ is anticipating the next cue.
 |---|---|---|
 | Success rate | all | activations / cues |
 | **Latency (median)** | all | **cue onset → activation, ms — identical for every channel (D3)** |
-| False activation rate | all | activations per minute during the no-cue window |
+| False activation rate | all | activations during WAIT / total WAIT duration, shown with raw count |
 
 Persisted to `PlayerProfile` in localStorage.
 
 ### 5.3 Recommender rules
 
+The recommender shows success, median response and false activations side by side. Each measured
+cell is labelled better, worse or similar. It declares one source clearly better only when that
+source is meaningfully better in at least one measured area and is not worse in another:
+
 ```text
-── IMPLEMENTED: channel remapping ──
-
-IF action.spatial OR action.latencyCritical                    (D8)
-    → do not recommend moving it.
-      If the player chooses to move it anyway, show a warning quantifying
-      the measured cost from calibration, and allow the override.
-      e.g. "Touch succeeded 91% of the time; gesture succeeded 64%.
-            Reliability may drop. Move it anyway?"
-
-IF touch.successRate < 0.80
-   AND alt.successRate > touch.successRate + 0.10
-   AND alt.falseActivationRate <= 1.0 per minute
-    → recommend moving the action to alt
-
-IF alt.falseActivationRate > 1.0 per minute
-    → never recommend alt, regardless of accuracy
-
+alternative has an advantage and no disadvantage → suggest alternative
+current has an advantage and no disadvantage     → keep current
+each source has an advantage                      → trade-off; player chooses
+all measurements are similar                      → keep current; no measured reason to change
+both sources miss more than half of cues          → retest
 ```
+
+This base comparison does not guess a universal reaction deadline for every game action. A host
+may add action-specific policy later, but mixed speed, reliability and false-activation evidence
+remains visible rather than being hidden inside one total score.
 
 Every recommendation carries a plain-language explanation and **Accept / Reject**. Changes apply
 **between rounds only**, never mid-play.
@@ -354,7 +347,8 @@ Each tier is independently demoable. Work stops wherever the schedule lands.
 - Swarmfall integrated through typed game actions; one existing discrete command is registered
   with the adaptive layer while the native directional control remains available
 - `BindingMap` with dispatch gating (D4) and pre-gate telemetry (D5)
-- Calibration: cue-response, adaptive trials, no-cue window — touch **and** gesture, identical task
+- Calibration: cue-response with 6-trial demo / 12-trial full modes and WAIT observation — touch
+  **and** gesture, identical task
 - MediaPipe gesture → one discrete command
 - Recommender with a plain-language, quantified comparison of the two measured channels
 - **Accept → live rebind → visibly works in round 2**
