@@ -1,144 +1,127 @@
 # Project Status
 
-**1 August 2026 · build until 8 Aug, submit 9 Aug**
+**2 August 2026 · build until 8 Aug, submit 9 Aug**
 
-Spec is in [PLAN.md](PLAN.md). Unconfirmed assumptions and open questions are in
-[CONSIDERATIONS.md](CONSIDERATIONS.md). This is just where we are and who does what.
+The specification is in [PLAN.md](PLAN.md). Private agent notes are not team
+specifications. Swarmfall is the mobile-web demo host; the adaptive-input layer
+is the product.
 
----
+## Working rules
 
-## Rules
+- Branch per person; review before merging to `main`.
+- Pull `main` before starting new work.
+- Never let two people own the same file.
+- Import the middleware only through its public `src/index.ts` entry point.
+- `packages/adaptive-input/` never imports from `demos/`.
+- Add every dependency, model and API to [DISCLOSURE.md](DISCLOSURE.md).
+- Do not add strategy generation, layout adaptation or native-app packaging to T0.
 
-- Branch per person, PR **merged same day**
-- `git pull` on `main` before starting each day
-- Never two people in one file
-- Update [DISCLOSURE.md](DISCLOSURE.md) when you add a dependency
-- Don't add scope because something finished early
+## T0 product scope
 
----
+The layer:
 
-## What we're building
+1. Supplies web touch and on-device hand-gesture input behind one channel
+   interface.
+2. Lets a host declare typed game actions, their original controls, and whether
+   each may be remapped.
+3. Records accepted and rejected attempts before the binding gate.
+4. Measures success rate, median cue-to-activation latency, and false
+   activations for each channel.
+5. Recommends an input mapping, explains the evidence, applies it only after
+   approval, and validates the result.
 
-A **game-agnostic middleware layer** that:
+The layer does **not** move individual game workers, inspect live game state,
+generate strategies, execute macros, redesign buttons, or alter gameplay.
 
-1. **Supplies input channels** — touch + on-device hand gesture, one interface. Games get
-   alternative controls without building a camera pipeline or integrating a model.
-2. **Assigns them per player** — measures how well you use each, recommends a better mapping,
-   explains it, applies it on approval, checks it helped.
+## Platform decision
 
-Swarmfall is the demo host, not the product.
+- Demo: responsive mobile-first browser game deployed over HTTPS.
+- Required test: at least one real phone, including camera denial and touch
+  fallback.
+- Current adapters: browser touch and browser MediaPipe.
+- Native Unity, Android and iOS adapters: designed future work, not delivered.
 
-> **Say "touch and hand gesture"** when describing what we provide. Face, tilt and sound are
-> designed, not delivered.
+## Current progress
 
----
-
-## Where we are
-
-| | |
+| Status | Item |
 |---|---|
-| ✅ | Repo structure, submission doc skeletons |
-| ✅ | Swarmfall playable |
-| 🔄 | Git + private GitHub + collaborators |
-| ⬜ | Swarmfall source into repo |
-
-### Delivery tiers
-
-Each tier demos on its own. We stop wherever the schedule lands.
-
-| Tier | Contents | Status |
-|---|---|---|
-| **T0** | Swarmfall on the layer · calibration (touch + gesture) · recommender · live rebind · before/after | **must ship** — not started |
-| **T1** | LLM primitive grammar — natural-language commands built from allowlisted parts | not started |
-| **T2** | Second demo host — proves portability | conditional |
-| **T3** | Extra gestures · face channel · advisory layout text | conditional |
-
----
-
-## Timeline
-
-| Date | What | Tier |
-|---|---|---|
-| **1 Aug** | Types merged. Swarmfall wired to `ActionBus` | T0 |
-| 2–3 Aug | Touch + gesture channels. Calibration harness | T0 |
-| 4–5 Aug | Recommender, live rebind, calibration + recommendation screens | T0 |
-| 6 Aug | Before/after screen. T1 if clear | T0 / T1 |
-| **7 Aug** | **Integration day.** Full flow end to end, repeatedly | — |
-| 8 Aug | **Freeze at noon.** Record video, finalise deck, finish README + DISCLOSURE | — |
-| 9 Aug | Submit. No code | — |
-| 13 / 23 Aug | Finalists / final presentations | — |
-
-**7 Aug is not a feature day.** Three people building in parallel will have integration problems.
-
----
+| Complete | Personal Swarmfall prototype is playable and remains the fallback host |
+| In review | Portable core skeleton: typed actions, defaults, binding gate, telemetry and lifecycle |
+| External prototype | Vision teammate has camera/calibration code to submit for review |
+| Pending | Team chooses the canonical Swarmfall implementation |
+| Pending | Demo owner publishes the real action and payload table |
+| Pending | Web touch and vision adapters integrate through the public channel contract |
+| Pending | Calibration scorer, recommender, screens and before/after validation |
 
 ## Work split
 
-Channels parallelise. The pipeline does not.
-
-```
-ActionBus → Calibration → Scorer → Recommender → Before/After    ← serial, one owner
-     ↑
-TouchControls · GestureInput · (FaceInput)                       ← parallel, one each
-```
-
-| Role | Owns | Notes |
+| Owner | Owns | Must not own |
 |---|---|---|
-| **Core & Integration** | Swarmfall integration, bus + gating, calibration harness, recommender, live rebind | Needs familiarity with the Swarmfall codebase. Largest share, runs all week |
-| **Vision Input & Screens** | `GestureInput` (MediaPipe), calibration + recommendation screens | Highest-risk single component — T0 fails without it |
-| **Touch Input & Quality** | `TouchTelemetry`, `InputScorer`, results screen, tuning, device testing, demo script | Swarmfall's buttons already exist — this role instruments them, doesn't build them |
+| **Core & Touch** | Public middleware contract, binding gate, telemetry, web touch adapter, scorer, recommender, final integration | Swarmfall mechanics or vision model internals |
+| **Vision Input** | MediaPipe loading, camera permission, gesture stability/fire-once, confidence, channel start/stop, vision calibration integration | Swarmfall actions, binding rules or game behaviour |
+| **Demo Host** | Canonical Swarmfall mechanics, action/payload table, game-side adapter, responsive mobile-web UI, real-phone gameplay testing | Middleware core, camera detection or input recommendation policy |
 
-Everything is concurrent **after one merge** — the types with empty bodies. That is the only
-blocking dependency in the project.
+The demo owner should work on `demo/coder-swarmfall` until the team selects and
+reviews that candidate. The existing `main` demo remains recoverable.
 
-Deck content goes to whoever knows the thesis best; technical slides reviewed by Core. No single
-role absorbs all three deliverables.
+## Immediate handoffs
 
----
+### Core & Touch
 
-## First tasks
+1. Merge the reviewed portable skeleton.
+2. Publish the public interfaces and usage notes.
+3. Review the vision source against `InputChannel`.
+4. Obtain the canonical demo's action table before writing game-specific wiring.
+5. Implement the web touch adapter and mapping-only scorer.
 
-**Core & Integration** — Merge `GameAction`, `InputSourceId`, `ActionBus`, `BindingMap`,
-`InputChannel` and the `InputScorer` output type, all with empty bodies. Push immediately; it
-unblocks the other two roles. Then route Swarmfall's existing `LASSO` and `SWITCH_TYPE` through
-the bus.
+### Vision Input
 
-**Vision Input** — Read [ARCHITECTURE.md](ARCHITECTURE.md) §2–3. Then `GestureInput`: camera
-permission, MediaPipe closed fist, confidence threshold, ~200 ms stability window, fire once,
-handle denial.
+Provide source code, dependency/model details, run instructions and known gaps.
+The reusable channel emits only:
 
-**Touch Input** — `TouchTelemetry`: for each press on Swarmfall's existing buttons, record
-landing position, duration, distance from centre, drift and repeat taps. The buttons already
-exist; this instruments them.
+```text
+source · monotonic timestamp · confidence · optional measurement session/phase
+```
 
----
+It must fire once per held gesture, require release before refiring, stop the
+camera cleanly, and leave touch playable when permission is denied.
 
-## Decisions
+### Demo Host
 
-Reasoning in [PLAN.md](PLAN.md) §2.
+Provide:
 
-| Decision | Why |
-|---|---|
-| Inputs emit **abstract actions**; the game never sees taps or gestures | Makes remapping a one-line change instead of a rewrite |
-| The **binding map gates dispatch**, not just config | Otherwise button and gesture both fire after a rebind |
-| Measurement is a **cue-response task**, not in-game taps | A missed tap looks identical to no tap |
-| The recommender **warns, never blocks** | Refusing to let players remap their own controls is paternalistic |
-| The recommender is a **rule set**, not a trained model | It has to explain itself before changing your controls |
-| The LLM **fills slots in a fixed schema** | Creativity from combining allowlisted parts, not from inventing game logic |
-| **One vision model at a time** | Two on one camera stream will hurt frame rate on mid-range phones |
+```text
+action name · payload shape · existing game effect · fixed/remappable
+```
 
----
+The host adapter translates approved actions into existing game behaviour. The
+middleware never emits per-worker movement instructions.
+
+## Delivery ladder
+
+| Tier | Contents | Status |
+|---|---|---|
+| **T0** | One discrete live rebind, touch + gesture calibration, recommendation, approval, before/after, mobile HTTPS demo | Must ship |
+| **T1** | Additional allowlisted mappings and explanation/mobile polish | Conditional |
+| **T2** | Second host proving portability | Conditional |
+| **T3** | Extra gesture, face or tilt channels | Conditional |
+
+Natural-language mapping is deferred until T0 is reliable. It may later select
+an allowlisted mapping ID; it will not generate strategy or executable logic.
+
+## Verification required for every handoff
+
+- Run `npm run check:adaptive` for middleware work.
+- Run `npm run build` for every repository change.
+- Paste actual output; label anything not tested as `UNVERIFIED`.
+- List every changed file.
+- No secrets, `.env` files, ZIP archives, `node_modules` or generated build
+  folders in commits.
 
 ## Submission checklist
 
-Email `outreachsg@garena.com` with a Google Drive link, folder named after the team.
-**Nothing may be modified after submitting.**
-
-- [ ] **Deck** — PDF, max 15 slides: problem, users, solution, how AI contributes, impact,
-      technical decisions
-- [ ] **Code** — private GitHub repo, add `garena-ai-build-challenge` as collaborator. README,
-      architecture overview, prompt configs, third-party disclosure. **No API keys**
-- [ ] **Video** — max 5 minutes, complete flow end to end
-- [ ] Repo link inside the Drive folder
-
-**Judging:** Problem–Solution Fit 40% · Build Quality 30% · Originality 30%.
+- Deck PDF, maximum 15 slides.
+- Source repository with architecture, setup and disclosure documentation.
+- Video, maximum five minutes, showing the complete flow on a real device.
+- HTTPS demo URL.
+- Final Google Drive submission on 9 August; no post-submission edits.

@@ -1,10 +1,10 @@
-# Adaptive Input Layer — Implementation Plan v6
+# Adaptive Input Layer — Implementation Plan v7
 
 **Garena AI Build Challenge 2026**
 
 > The specification. For current progress, milestones and work split see [STATUS.md](STATUS.md).
-> v6 reflects the released case brief and the shift to a middleware product with Swarmfall as
-> demo host.
+> v7 fixes the T0 scope at input mapping: a portable core, web touch and hand-vision adapters,
+> measurement, recommendation, approval, and validation. Swarmfall is only the mobile-web host.
 
 ---
 
@@ -27,9 +27,9 @@
 | Originality | 30% | Originality of insight, differentiation from existing products, uniqueness of execution |
 
 Two consequences. First, the largest criterion is judged mostly on the deck, not the code — the
-decision log in §2 is deck material, not internal scaffolding. Second, "genuine use of
-AI-driven behaviour" is what punishes a decorative LLM, which is why the LLM component sits at
-T1 rather than last.
+decision log in §2 is deck material, not internal scaffolding. Second, AI must do real work.
+On-device MediaPipe gesture recognition is the shipped AI component; an LLM is not required for
+T0 and is deferred until the mapping pipeline works end to end.
 
 ### Technology guidelines
 
@@ -115,9 +115,9 @@ deck slide.
 | D10 | **Hand gesture is channel #1.** Face and tilt are T3. | `GestureRecognizer` ships canned categories and confidence scores. Proves the pipeline cheapest. |
 | D11 | **Face input, if built, uses blendshapes (`jawOpen`), never head pose.** | A handheld phone moves with the player's hands, corrupting camera-relative head pose. Blendshapes are face-relative and substantially less affected — though still degraded by poor lighting, occlusion and talking. Not immune. |
 | D12 | **Deploy to HTTPS before building features.** | `getUserMedia` needs a secure context; LAN access over plain HTTP silently blocks the camera. Also the submission artifact. |
-| D13 | **The LLM fills slots in a fixed schema validated server-side.** It never generates freely, never enters the real-time loop, never writes gameplay code. | Player creativity comes from combining allowlisted primitives. Unbounded generation cannot be validated and will break in demo. |
+| D13 | **Natural-language mapping is deferred.** If added later, a model may select only allowlisted input-to-action mappings and never gameplay behaviour. | T0 must prove adaptation without a decorative LLM, generated strategy, macros or executable output. |
 | D14 | **The recommender is a transparent rule set, not a trained model.** | It must justify itself to the player before changing their controls. Explainability is the feature, not a limitation. |
-| D15 | **Only one adaptation is implemented: moving an action to a different channel.** Layout findings are advisory text, never auto-applied. | Auto-applying layout changes is a second system with its own failure modes, and layout advice needs more samples than calibration provides. |
+| D15 | **Only one adaptation is implemented: moving an existing action to a different input source.** Button placement, size, offset and drift adaptation are out of scope. | UI layout requires game-specific code and weakens the middleware boundary. |
 | D16 | **Channels may differ in speed and reliability. They must never differ in capability.** | Every command reachable by gesture must also be reachable by touch. Otherwise the alternative channel is a power-up, the accessibility framing collapses, and a judge correctly calls it a cheat. |
 
 ---
@@ -140,23 +140,19 @@ threats. Sixty-second rounds.
 
 ### Actions
 
-Swarmfall already has both controls the thesis needs. **T0 requires no new gameplay features.**
+The canonical team demo and final action table are still being agreed. T0 does not depend on new
+strategy mechanics; it needs the existing spatial lasso plus one existing discrete command.
 
 | Action | Requirements | Role | Status |
 |---|---|---|---|
-| `LASSO` | `spatial: true` | Territory indicator. Remappable, but **warned against with a quantified precision cost (D8)** | exists |
-| `SWITCH_TYPE` | discrete, non-urgent | **The remap candidate** — miner / defender toggle | exists |
-| `RECALL`, `HOLD` | discrete, non-urgent | Extra remap candidates; more primitives for the T1 grammar | **optional, T3** |
+| Lasso start / point / end | `spatial: true` | Original touch control; not the T0 remap candidate | exists in personal prototype |
+| Squad selection | discrete, non-urgent | Candidate only after the demo owner confirms its action and payload | exists in personal prototype |
+| Begin / restart | discrete | Fixed original touch controls, excluded from recommendations | exists in personal prototype |
 
-The demo is therefore *"closed fist switches between miners and defenders"* — no new game code.
-
-`RECALL` and `HOLD`, if added, are deliberately **declarative player intents** — return to core,
-stop and defend — with no reading of live game state. A command that inspected the world to pick
-its own target would be a macro, and that is what §12 rules out.
-
-**The 2–3 discrete commands must be added.** Without them there is nothing to measure or remap,
-and the thesis has no surface in this game. This is the one structural requirement of the
-integration.
+The demo owner must publish the action contract before integration. The layer emits only a
+registered action and typed payload; the game adapter decides how that action affects workers.
+Per-worker movement commands, target selection and timed command sequences never belong in the
+middleware.
 
 ### Ergonomics
 
@@ -179,38 +175,45 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the reviewer-facing version. Design n
 
 ### 4.1 Data flow
 
-```
-TouchControls ─┐
-GestureInput  ─┼─► ActionBus.emit(action, { source, timestamp, ... })
-FaceInput     ─┘
-                        │
-                        ├──────────────► TelemetryRecorder   (PRE-GATE, D5)
-                        ▼
-              BindingMap.get(action) === payload.source ?     (D4)
-                        │
-                 no ────┴──── yes
-                 │             │
-                 ▼             ▼
-        log as rejected   dispatch to listeners
+```text
+TouchInput ───┐
+GestureInput ─┴─► InputSignal (trigger, point, or direction + metadata)
+                         │
+                         ▼
+              host adapter supplies action + typed payload
+                         │
+                         ├────────► TelemetryRecorder (PRE-GATE, D5)
+                         ▼
+              BindingMap.get(action) === signal.source ?      (D4)
+                         │
+                  no ────┴──── yes
+                  │             │
+                  ▼             ▼
+         log as rejected   dispatch to host listener
 ```
 
 Accepting a recommendation is one line, at runtime:
 
 ```ts
-bindings.set('RECALL', InputSourceId.HAND_CLOSED_FIST);
+adaptive.rebind('TOGGLE_SQUAD', InputSourceId.HAND_CLOSED_FIST);
 ```
 
 ### 4.2 Typed payloads
 
-Continuous actions carry a vector; discrete actions carry confidence. One loose type cannot
-serve both.
+Host actions retain their own typed payloads. Trigger, absolute-point and relative-direction
+input signals use a separate game-independent union.
 
 ```ts
-type Payload<A extends GameAction> =
-  ActionPayloadMap[A] & { source: InputSourceId; timestamp: number };
+emit<A extends GameAction>(
+  action: A,
+  payload: ActionPayloadMap[A],
+  signal: InputSignal,
+): boolean;
 
-emit  <A extends GameAction>(action: A, payload: Payload<A>): void;
-listen<A extends GameAction>(action: A, fn: (p: Payload<A>) => void): void;
+listen<A extends GameAction>(
+  action: A,
+  fn: (payload: ActionPayloadMap[A]) => void,
+): void;
 ```
 
 ### 4.3 Repository layout
@@ -223,11 +226,11 @@ packages/
     │   ├── BindingMap.ts     ├─ spine                          [core]
     │   ├── InputChannel.ts  ─┘  (merged first, unblocks all)
     │   ├── TouchControls.ts    channel                         [touch]
-    │   ├── TouchTelemetry.ts   channel                         [touch]
+    │   ├── WebTouchInput.ts    web channel                     [core/touch]
     │   └── GestureInput.ts     channel                         [vision]
     ├── calibration/         cue-response harness               [core]
     ├── recommendation/
-    │   ├── InputScorer.ts       samples → per-channel numbers  [touch]
+    │   ├── InputScorer.ts       samples → per-channel numbers  [core]
     │   └── ControlRecommender.ts  rules + explanations         [core]
     └── data/                SessionTelemetry, PlayerProfile    [core]
 
@@ -286,13 +289,6 @@ is anticipating the next cue.
 | Success rate | all | activations / cues |
 | **Latency (median)** | all | **cue onset → activation, ms — identical for every channel (D3)** |
 | False activation rate | all | activations per minute during the no-cue window |
-| Miss distance | touch | px from button centre for failed taps |
-| Drift | touch | touchstart → touchend displacement |
-| Directional bias | touch | mean offset vector |
-| Repeat-tap rate | touch | % of taps <150 ms after the previous |
-| Stability time | vision | ms held above threshold before trigger |
-| Confidence (median) | vision | model score at trigger |
-| In-game command success | all | attempted vs succeeded, during a round |
 
 Persisted to `PlayerProfile` in localStorage.
 
@@ -316,20 +312,8 @@ IF touch.successRate < 0.80
 IF alt.falseActivationRate > 1.0 per minute
     → never recommend alt, regardless of accuracy
 
-── ADVISORY TEXT ONLY, never auto-applied (D15) ──
-
-IF mean tap offset > 25% of button radius
-   AND >= 60% of taps fall on the same side of centre
-    → "your taps land consistently <direction> of centre"
-
-IF >= 20% of failed taps land within 1.5x button radius
-    → "a larger hitbox would have captured N of your misses"
-
-IF repeat-tap rate > 15%
-    → "frequent double-taps detected; a longer debounce may help"
 ```
 
-Bias is a **proportion of button radius**, not a fixed pixel count, so it scales across devices.
 Every recommendation carries a plain-language explanation and **Accept / Reject**. Changes apply
 **between rounds only**, never mid-play.
 
@@ -350,38 +334,11 @@ Stating the confound pre-empts the most obvious challenge and costs one sentence
 | Component | Role | Runs |
 |---|---|---|
 | MediaPipe Tasks Vision | On-device gesture recognition | In-browser, on-device |
-| LLM (constrained schema) | Interprets player constraints; composes commands from an allowlisted primitive grammar | Server-side function, between rounds |
 
-### The primitive grammar (T1)
-
-Games declare their available primitives. The layer exposes the combinatorial space. Players
-compose in natural language.
-
-```text
-{unit type} × {target selector} × {formation} × {trigger condition}
-```
-
-Swarmfall declares `{guards, harvesters} × {nearest-threat, core, largest-cargo} ×
-{surround, spread, intercept}`. A player who types *"keep my guards between the core and whatever
-is incoming"* gets `guards × nearest-threat × intercept` — a standing order they can name
-themselves. Nothing is hardcoded; the command did not exist until the player described it.
-
-Composed presets are **standing orders set between rounds**, not real-time macros. The
-distinction matters: a standing order is a policy the player configures in advance and can see
-running, which is ordinary strategy-game delegation. A macro is one input firing a timed
-sequence during play, which §12 rules out.
-
-Every axis is allowlisted, so every output is validated before reaching any game. Creativity
-comes from combinatorics rather than free generation (D13). A different game declares different
-primitives and the same layer works unchanged — which is a much stronger claim than "the LLM
-understands our game."
-
-The player also states constraints in natural language — *"I'm playing one-handed," "my thumb
-gets tired"* — which the LLM converts into weightings the rule-based recommender consumes. The
-rules still decide; the model interprets and explains.
-
-API credentials live in server-side environment variables, never in client code or the
-repository.
+MediaPipe is the shipped AI behaviour: it turns camera frames into on-device gesture categories
+and confidence values. The transparent recommender then uses measured player results. A future
+model may interpret natural language into an allowlisted mapping ID, but it is not part of T0,
+does not generate strategy, and does not enter the real-time loop.
 
 ---
 
@@ -401,10 +358,9 @@ Each tier is independently demoable. Work stops wherever the schedule lands.
 - Live HUD: detected input, confidence, mapped action, latency
 - Deployed HTTPS URL
 
-### T1 — AI legibility
-LLM primitive grammar and constraint interpretation (§6). Off the critical path — a serverless
-function, a fetch, an allowlist check. This tier is what "genuine use of AI-driven behaviour"
-in the 30% Build Quality criterion is asking for.
+### T1 — Mapping polish
+Additional allowlisted mappings, clearer explanations and stronger mobile validation. A
+natural-language selector is considered only after T0 is reliable and is not required to ship.
 
 ### T2 — Portability proof
 Second demo host, if time permits, would provide the portability proof. It turns the middleware
@@ -413,13 +369,12 @@ claim from asserted to demonstrated and pre-empts the obvious judge objection:
 Swarmfall integration going smoothly.
 
 ### T3 — Polish
-Advisory layout text · second gesture · face blendshape channel · tilt channel · JSON export ·
-sprite art.
+Second gesture · face blendshape channel · tilt channel · JSON export · sprite art.
 
 ### Cut
 Custom-trained gestures · sound input (pitch thresholding is not itself an ML feature, and game
-audio interferes with mic input) · head pose · auto-applied layout changes · multiplayer ·
-procedural content.
+audio interferes with mic input) · head pose · button-layout adaptation · generated strategy ·
+multiplayer · procedural content.
 
 Anything cut is presented in the deck as **designed, not shipped**, with the schema or interface
 as evidence. Explicit prioritisation reads as judgment; silence reads as abandonment. The brief
@@ -431,10 +386,10 @@ explicitly rewards "prioritisation of trade-offs."
 
 | Date | **Core & Integration** | **Vision Input & Screens** | **Touch Input & Quality** |
 |---|---|---|---|
-| **1 Aug** | **Merge the types first**, before anything else. Then route Swarmfall's existing `LASSO` and `SWITCH_TYPE` through `ActionBus` | Read the interface. Camera permission, MediaPipe loading | Read the interface. `TouchTelemetry` against Swarmfall's existing buttons |
-| 2–3 Aug | Calibration harness — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | `TouchTelemetry` complete; `InputScorer` — samples → per-channel numbers |
+| **1 Aug** | **Merge the types first**, before anything else. Obtain the canonical demo action contract | Read the interface. Camera permission, MediaPipe loading | Define the web touch adapter against the same interface |
+| 2–3 Aug | Calibration harness — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | Web touch channel and `InputScorer` — samples → per-channel numbers |
 | 4–5 Aug | `ControlRecommender` — rules, explanation text, Accept/Reject, **live rebind** | Calibration and recommendation screens | Results / before-after screen; balance tuning |
-| 6 Aug | Before/after aggregation | **T1** LLM grammar if clear | Device test matrix; demo script written and timed |
+| 6 Aug | Before/after aggregation | Vision reliability and permission fallback | Device test matrix; demo script written and timed |
 | **7 Aug** | **Integration day — everyone.** Full flow end to end, repeatedly, no reload. **T0 complete** | | |
 | 8 Aug | **Freeze at noon.** Technical slides reviewed | Freeze at noon. Deck finalised | **Record video.** README, DISCLOSURE |
 | 9 Aug | Standby for blocking bugs | Submit. **No code** | Standby |
@@ -446,7 +401,7 @@ idle on day one.
 **Integration day is not optional.** Three people building in parallel for a week will have
 integration problems and there must be a day budgeted for finding them.
 
-**If behind on 5 August:** cut T1, reduce to a single discrete remappable command, and protect
+**If behind on 5 August:** cut all mapping polish, reduce to a single discrete remappable command, and protect
 the integration day. A complete honest T0 beats a broken ambitious build — Build Quality is
 judged on whether it *functions end-to-end in a live setting*.
 
@@ -478,15 +433,9 @@ a complete spine is the entire demo.
 
 | Role | Owns | Rationale |
 |---|---|---|
-| **Core & Integration** | Swarmfall integration, then the **spine** — `ActionBus`, `BindingMap`, calibration harness, `ControlRecommender`, live rebind | Integration requires familiarity with the Swarmfall codebase, so it goes wherever that knowledge already is. The spine is algorithmic and testable and needs no game-development experience. **This is the largest share of the product and it runs all week — not a setup task followed by a handoff.** |
-| **Vision Input & Screens** | `GestureInput` (MediaPipe), then the calibration and recommendation screens | The highest-risk single component in the project: T0 fails without a working alternative channel. Allocate accordingly. |
-| **Touch Input & Quality** | `TouchTelemetry`, **`InputScorer`** (samples → numbers, all channels), results screen, tuning, device testing, demo script | Swarmfall's buttons already exist, so this role instruments them rather than building them. `InputScorer` moves here to take one item off the serial critical path: it is pure data transformation with a clean contract, and this role already derives touch-specific summaries. |
-
-**Why `InputScorer` sits outside Core.** Core is the bottleneck — every stage of the spine
-depends on the previous one. `InputScorer` has no coupling to the harness internals, so moving it
-off shortens the serial chain. The dependency is handled by the same day-one trick: **Core defines
-the scorer's output type in the types merge**, codes the recommender against that type
-immediately, and stubs it with fixed numbers if the implementation runs late.
+| **Core & Touch** | Portable spine, web touch adapter, calibration records, scorer, recommender and live rebind | This is the serial critical path and owns the public package contract. |
+| **Vision Input** | `GestureInput` (MediaPipe), camera lifecycle behaviour and vision calibration integration | The channel emits neutral signals and never imports or names Swarmfall. |
+| **Demo Host** | Canonical Swarmfall mechanics, game action contract, host adapter, responsive mobile-web UI and real-phone testing | The demo consumes the layer; it never defines middleware internals. |
 
 **Deliverables.** Deck content goes wherever the thesis is best understood, with technical slides
 reviewed by Core. Device testing, the demo script and raw recording sit with Touch Input &
@@ -548,7 +497,7 @@ Quality. No single role absorbs all three deliverables.
 | One trial flips the recommendation | Medium | §5.1 adaptive trial count |
 | Gesture latency worse than touch | Medium | D3 — it *will* be. Report honestly; it is the tradeoff the recommender arbitrates |
 | Before/after confounded by practice | Medium | §5.4 calibration is the headline metric |
-| LLM API access unresolved | Medium | T1 is off the critical path; T0 does not depend on it |
+| Natural-language mapping is not ready | Low | Explicitly deferred; T0 proves measured input mapping without it |
 
 ---
 

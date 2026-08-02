@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "vinext build && node scripts/prepare-sites.mjs",
+    "check:adaptive": "tsc -p packages/adaptive-input/tsconfig.json && node --experimental-transform-types packages/adaptive-input/src/__checks__/gateCheck.ts",
+    "build": "npm run check:adaptive && vinext build && node scripts/prepare-sites.mjs",
     "dev": "vinext dev",
     "start": "vinext start"
   },

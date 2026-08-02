@@ -6,11 +6,14 @@
     "jsx": "preserve",
     "strict": true,
     "skipLibCheck": true,
+    "paths": {
+      "@adaptive-input": ["./packages/adaptive-input/src/index.ts"]
+    },
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true
   },
-  "include": ["app", "demos/swarmfall/src"]
+  "include": ["app", "demos/swarmfall/src", "packages/adaptive-input/src"]
 }
