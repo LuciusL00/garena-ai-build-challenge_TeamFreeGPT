@@ -36,4 +36,5 @@ export type {
 } from './channel.ts';
 
 export * from './calibration/types.ts';
+export * from './calibration/harness.ts';
 export * from './recommendation/types.ts';
