@@ -1,10 +1,10 @@
-# Adaptive Input Layer — Implementation Plan v7
+# Adaptive Input Layer — Implementation Plan v8
 
 **Garena AI Build Challenge 2026**
 
 > The specification. For current progress, milestones and work split see [STATUS.md](STATUS.md).
-> v7 fixes the T0 scope at input mapping: a portable core, web touch and hand-vision adapters,
-> measurement, recommendation, approval, and validation. Swarmfall is only the mobile-web host.
+> v8 keeps T0 on one discrete touch-button ↔ closed-fist mapping. Swarmfall now exposes native
+> directional squad control as a later mapping seam; pointing and directional calibration are T1.
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Item | Value |
 |---|---|
-| Plan date | 30 July 2026 |
+| Plan date | 30 July 2026; revised 3 August 2026 |
 | Submission | **9 August 2026** — deck, source code, video |
 | Finalists announced | 13 August · Final presentations 23 August |
 | Team | 3 members, full team from 1 August |
@@ -86,12 +86,12 @@ What a developer writes to adopt the layer:
 adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
 
 adaptive.registerActions([
-  { id: 'LASSO',  requirements: { spatial: true,  latencyCritical: false } },
-  { id: 'RECALL', requirements: { spatial: false, latencyCritical: false } },
-  { id: 'HOLD',   requirements: { spatial: false, latencyCritical: false } },
+  { id: 'ACTIVATE_STRATEGY', requirements: { spatial: false, latencyCritical: false } },
+  { id: 'BEGIN_ROUND',       requirements: { spatial: false, latencyCritical: false } },
+  { id: 'RESTART_ROUND',     requirements: { spatial: false, latencyCritical: false } },
 ]);
 
-adaptive.on('RECALL', () => swarm.recall());
+adaptive.on('ACTIVATE_STRATEGY', () => game.activateSelectedStrategy());
 ```
 
 The game never touches a pointer event, a hand landmark or a camera stream. This snippet is a
@@ -110,7 +110,7 @@ deck slide.
 | D5 | **Telemetry taps the stream pre-gate.** Rejected emissions are recorded, not discarded. | The unbound channel must keep being measured — that is what produces the before/after. Rejected emissions are also habit-persistence data. |
 | D6 | **`InputSourceId` and `InputChannelId` are separate concepts.** | Bindings bind *sources* (`HAND_CLOSED_FIST`). Channels (`HAND_VISION`) own lifecycle. One model provides several sources. |
 | D7 | **Only one vision model runs at a time** — whichever channel owns a bound source. | Two MediaPipe models on one stream roughly doubles inference cost and hurts frame rate on mid-range Android. |
-| D8 | **The recommender warns; it never blocks.** Actions whose requirements are poorly served by a channel produce a warning with a **quantified cost**, and the player may override it. | Refusing to let a player remap their own controls is paternalistic, and paternalism is the wrong posture for an accessibility product — the premise is that the player knows their own needs. Quantifying the cost ("your lasso accuracy was 91% on touch and 64% on gesture") is still evidence the system reasons about requirements, while leaving the decision where it belongs. |
+| D8 | **The recommender warns; it never blocks.** Actions whose requirements are poorly served by a channel produce a warning with a **quantified cost**, and the player may override it. | Refusing to let a player remap their own controls is paternalistic, and paternalism is the wrong posture for an accessibility product — the premise is that the player knows their own needs. Quantifying the measured success, latency and false-activation difference still leaves the decision where it belongs. |
 | D9 | **The layer never imports from `demos/`.** | The one-way dependency is what makes the portability claim verifiable rather than asserted. |
 | D10 | **Hand gesture is channel #1.** Face and tilt are T3. | `GestureRecognizer` ships canned categories and confidence scores. Proves the pipeline cheapest. |
 | D11 | **Face input, if built, uses blendshapes (`jawOpen`), never head pose.** | A handheld phone moves with the player's hands, corrupting camera-relative head pose. Blendshapes are face-relative and substantially less affected — though still degraded by poor lighting, occlusion and talking. Not immune. |
@@ -124,32 +124,36 @@ deck slide.
 
 ## 3. Demo host: Swarmfall
 
-Swarmfall is a real-time swarm control game: the player lassos territories, units divide
-themselves among targets inside the loop, harvesters extract and bank ore, guards intercept
-threats. Sixty-second rounds.
+Swarmfall is a real-time swarm control game: the player selects a squad and presses and drags
+like a virtual joystick to move that squad's activity centre. Units coordinate around that
+centre, harvesters extract and bank ore, and guards intercept threats. Releasing stops the
+directional command. Switching squads while a direction is active transfers the direction to
+the new squad and stops commanding the previous one. Rounds last sixty seconds.
 
 **Why it fits the thesis better than a conventional action game:**
 
-- Units act autonomously, so **input bandwidth is low**. The player issues occasional commands
-  rather than continuous twitch input — which is precisely what makes alternative channels
-  viable. The genre supports the argument rather than merely hosting it.
-- The loop is **bursty**: draw, let the swarm work, redraw. Those gaps are where a gesture fits,
-  so the hands-on-screen conflict is far less severe than in a shooter.
-- The lasso is **obviously spatial**, so the recommender's advice against moving it — and the
-  measured precision cost it quotes — is self-evidently sensible rather than a designed contrivance.
+- Units retain local autonomous behaviour, so the player steers squads rather than individual
+  workers. This keeps the game action boundary small and deterministic.
+- The native pointer joystick and future hand-point direction both produce the same relative
+  `{x, y}` information. Vision therefore changes the input channel, not the game's capabilities.
+- T0 deliberately calibrates one discrete touch/fist command first. Continuous pointing is kept
+  out of the critical path until recommendation and live rebinding work end to end.
 
 ### Actions
 
-The canonical team demo and final action table are still being agreed. T0 does not depend on new
-strategy mechanics; it needs the existing spatial lasso plus one existing discrete command.
+The current repository Swarmfall is Lucius's temporary integration host while Mark is unavailable.
+Mark's canonical demo and final action table are still pending. T0 needs one existing zero-payload
+discrete command; it does not depend on pointing or new strategy generation.
 
-| Action | Requirements | Role | Status |
+| Action | Payload / requirements | Role | Status |
 |---|---|---|---|
-| Lasso start / point / end | `spatial: true` | Original touch control; not the T0 remap candidate | exists in personal prototype |
-| Squad selection | discrete, non-urgent | Candidate only after the demo owner confirms its action and payload | exists in personal prototype |
-| Begin / restart | discrete | Fixed original touch controls, excluded from recommendations | exists in personal prototype |
+| `MOVE_SQUAD_DIRECTION` | `{ direction: { x, y } }`; continuous | Native pointer joystick; T1 seam for hand-point direction | implemented locally in Lucius's fallback host |
+| `STOP_SQUAD_MOVEMENT` | `{}`; direction-ended command | Pointer release/cancel; prevents stuck movement | implemented locally in Lucius's fallback host |
+| `SELECT_SQUAD` | `{ squad }`; discrete | Fixed touch selection; transfers an active direction | implemented locally in Lucius's fallback host |
+| `ACTIVATE_STRATEGY` | `{}`; discrete, non-urgent | Temporary T0 remap candidate until Mark supplies the canonical action list | exists in Lucius's fallback host |
+| Begin / restart | `{}`; discrete | Fixed original touch controls, excluded from recommendations | exists in Lucius's fallback host |
 
-The demo owner must publish the action contract before integration. The layer emits only a
+Mark must publish the canonical action contract before final integration. The layer emits only a
 registered action and typed payload; the game adapter decides how that action affects workers.
 Per-worker movement commands, target selection and timed command sequences never belong in the
 middleware.
@@ -301,8 +305,8 @@ IF action.spatial OR action.latencyCritical                    (D8)
     → do not recommend moving it.
       If the player chooses to move it anyway, show a warning quantifying
       the measured cost from calibration, and allow the override.
-      e.g. "Lasso accuracy: 91% on touch, 64% on gesture.
-            Precision will drop. Move it anyway?"
+      e.g. "Touch succeeded 91% of the time; gesture succeeded 64%.
+            Reliability may drop. Move it anyway?"
 
 IF touch.successRate < 0.80
    AND alt.successRate > touch.successRate + 0.10
@@ -347,20 +351,23 @@ does not generate strategy, and does not enter the real-time loop.
 Each tier is independently demoable. Work stops wherever the schedule lands.
 
 ### T0 — Core · cannot be cut
-- Swarmfall integrated: lasso and 2–3 discrete commands all routed through `ActionBus`
+- Swarmfall integrated through typed game actions; one existing discrete command is registered
+  with the adaptive layer while the native directional control remains available
 - `BindingMap` with dispatch gating (D4) and pre-gate telemetry (D5)
 - Calibration: cue-response, adaptive trials, no-cue window — touch **and** gesture, identical task
 - MediaPipe gesture → one discrete command
-- Recommender with plain-language explanation, and a quantified warning on `LASSO` that the
-  player can override
+- Recommender with a plain-language, quantified comparison of the two measured channels
 - **Accept → live rebind → visibly works in round 2**
 - Before/after screen
 - Live HUD: detected input, confidence, mapped action, latency
 - Deployed HTTPS URL
 
 ### T1 — Mapping polish
-Additional allowlisted mappings, clearer explanations and stronger mobile validation. A
-natural-language selector is considered only after T0 is reliable and is not required to ship.
+Map hand-point direction to the same `MOVE_SQUAD_DIRECTION` action used by the native pointer
+joystick. Add an equivalent direction-ended signal, four-direction prompted calibration with
+automatic angular-error measurement, additional allowlisted mappings, clearer explanations and
+stronger mobile validation. A natural-language selector is considered only after T0 is reliable
+and is not required to ship.
 
 ### T2 — Portability proof
 Second demo host, if time permits, would provide the portability proof. It turns the middleware
@@ -384,19 +391,19 @@ explicitly rewards "prioritisation of trade-offs."
 
 ## 8. Schedule
 
-| Date | **Core & Integration** | **Vision Input & Screens** | **Touch Input & Quality** |
+| Date | **Lucius — Core & Touch** | **Vivin — Vision** | **Mark — Demo Host** |
 |---|---|---|---|
-| **1 Aug** | **Merge the types first**, before anything else. Obtain the canonical demo action contract | Read the interface. Camera permission, MediaPipe loading | Define the web touch adapter against the same interface |
-| 2–3 Aug | Calibration harness — cue-response loop, adaptive trials, no-cue window | `GestureInput` — closed fist, confidence threshold, stability window, fire-once, denial path | Web touch channel and `InputScorer` — samples → per-channel numbers |
-| 4–5 Aug | `ControlRecommender` — rules, explanation text, Accept/Reject, **live rebind** | Calibration and recommendation screens | Results / before-after screen; balance tuning |
-| 6 Aug | Before/after aggregation | Vision reliability and permission fallback | Device test matrix; demo script written and timed |
-| **7 Aug** | **Integration day — everyone.** Full flow end to end, repeatedly, no reload. **T0 complete** | | |
-| 8 Aug | **Freeze at noon.** Technical slides reviewed | Freeze at noon. Deck finalised | **Record video.** README, DISCLOSURE |
+| **1 Aug** | Create the portable types, binding gate and telemetry skeleton | Prototype camera, closed-fist and point-direction recognition | Confirm that the canonical demo can be exported and extended |
+| 2–3 Aug | Review the skeleton; add the temporary directional-control host; define the T0 touch path | Provide source, model/dependency details and current calibration behaviour | Export the canonical demo and publish its action/payload table |
+| 4–5 Aug | Touch channel, identical cue-response calibration, `InputScorer`, recommender, Accept/Reject and **live rebind** | Port recognition behind `InputChannel`; add stability, fire-once, denial and clean stop | Expose canonical actions through the game adapter; mobile-web gameplay check |
+| 6 Aug | Before/after aggregation and integration | Vision reliability, prompted tests and permission fallback | Device test matrix; help integrate and tune the host |
+| **7 Aug** | **Integration day — everyone. Full flow end to end, repeatedly, without reload. T0 complete.** | | |
+| 8 Aug | **Freeze at noon.** Technical slides reviewed | Freeze at noon. Deck finalised | **Record video.** README and disclosure review |
 | 9 Aug | Standby for blocking bugs | Submit. **No code** | Standby |
 
-**The types merge is the only blocking dependency in the project.** It is twenty minutes of empty
-interfaces and it must be pushed before Swarmfall integration begins — otherwise two roles sit
-idle on day one.
+The portable types and binding skeleton now exist on Lucius's review branch. The immediate
+integration blockers are reviewing that contract and receiving Mark's canonical action table;
+game-specific wiring should not be guessed before those two interfaces agree.
 
 **Integration day is not optional.** Three people building in parallel for a week will have
 integration problems and there must be a day budgeted for finding them.
@@ -433,9 +440,9 @@ a complete spine is the entire demo.
 
 | Role | Owns | Rationale |
 |---|---|---|
-| **Core & Touch** | Portable spine, web touch adapter, calibration records, scorer, recommender and live rebind | This is the serial critical path and owns the public package contract. |
-| **Vision Input** | `GestureInput` (MediaPipe), camera lifecycle behaviour and vision calibration integration | The channel emits neutral signals and never imports or names Swarmfall. |
-| **Demo Host** | Canonical Swarmfall mechanics, game action contract, host adapter, responsive mobile-web UI and real-phone testing | The demo consumes the layer; it never defines middleware internals. |
+| **Lucius — Core & Touch** | Portable spine, web touch adapter, calibration records, scorer, recommender, live rebind and final integration | This is the serial critical path and owns the public package contract. |
+| **Vivin — Vision Input** | `GestureInput` (MediaPipe), camera lifecycle behaviour and vision calibration integration | The channel emits neutral signals and never imports or names Swarmfall. |
+| **Mark — Demo Host** | Canonical Swarmfall mechanics, game action contract, host adapter, responsive mobile-web UI and real-phone testing | The demo consumes the layer; it never defines middleware internals. |
 
 **Deliverables.** Deck content goes wherever the thesis is best understood, with technical slides
 reviewed by Core. Device testing, the demo script and raw recording sit with Touch Input &
@@ -463,8 +470,8 @@ Quality. No single role absorbs all three deliverables.
 
 ### 2 August
 5. Swarmfall runs from the deployed HTTPS URL on a real phone.
-6. Lasso and all discrete commands route through `ActionBus`. **Zero direct pointer/touch API
-   references in game logic.**
+6. Directional movement and discrete commands route through the game `ActionBus`. Browser
+   pointer/touch APIs stay in the input adapter and do not appear in simulation logic.
 7. `npm run build` passes with `strict: true`, zero errors.
 
 ### 7 August — T0 complete
@@ -472,8 +479,8 @@ Quality. No single role absorbs all three deliverables.
 9. Calibration produces per-channel metrics for touch and gesture on an identical task.
 10. Recommender emits a recommendation with a plain-language explanation.
 11. **Accept rebinds at runtime and the gesture visibly works in round 2.** Reject changes nothing.
-12. Recommender does not recommend remapping `LASSO`; if the player overrides, it shows the
-    **quantified precision cost** from calibration and still applies the change.
+12. Only the newly bound source dispatches the command; attempts from the old source remain in
+    pre-gate telemetry for before/after comparison.
 13. Before/after screen shows calibration deltas, with the practice confound noted.
 14. HUD shows detected input, confidence, mapped action, latency.
 15. Camera denial leaves the game fully playable on touch.
@@ -535,7 +542,7 @@ Still open:
 1. **Cue modality.** The calibration cue is currently visual. A visual cue competes for the
    attention the gesture channel also needs, which may inflate gesture latency relative to touch —
    a confound in the direction that flatters touch. Audio cue, or both?
-3. **What the video leads with.** The recommendation moment (accept → rebind → it works) or the
-   caution moment (the layer quantifies what moving the lasso would cost, then lets the player
-   decide anyway)? The caution moment is more distinctive but needs more setup in a 5-minute video.
-4. **Does T2 get built?** Decide 5 August based on integration progress.
+2. **What the video leads with.** Prefer the recommendation moment: measure touch and fist,
+   explain the evidence, accept the change, then show the new binding working in the same game.
+   Decide whether directional pointing appears as a short T1 preview or stays out of the final cut.
+3. **Does T2 get built?** Decide 5 August based on integration progress.
