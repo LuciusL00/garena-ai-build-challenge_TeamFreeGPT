@@ -5,9 +5,8 @@ export type Squad = 'GUARDS' | 'HARVESTERS';
 
 export type GameAction =
   | 'SELECT_SQUAD'
-  | 'LASSO_START'
-  | 'LASSO_POINT'
-  | 'LASSO_END'
+  | 'MOVE_SQUAD_DIRECTION'
+  | 'STOP_SQUAD_MOVEMENT'
   | 'SELECT_STRATEGY'
   | 'ACTIVATE_STRATEGY'
   | 'BEGIN_ROUND'
@@ -15,9 +14,8 @@ export type GameAction =
 
 export interface ActionPayloadMap {
   SELECT_SQUAD: { squad: Squad };
-  LASSO_START: { point: Point };
-  LASSO_POINT: { point: Point };
-  LASSO_END: { point: Point };
+  MOVE_SQUAD_DIRECTION: { direction: Point };
+  STOP_SQUAD_MOVEMENT: Record<string, never>;
   SELECT_STRATEGY: { strategyId: StrategyId };
   ACTIVATE_STRATEGY: Record<string, never>;
   BEGIN_ROUND: Record<string, never>;

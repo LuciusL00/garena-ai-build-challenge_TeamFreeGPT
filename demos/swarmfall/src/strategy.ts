@@ -1,7 +1,7 @@
 export type StrategyId = 'MINER_PROTECT' | 'ESCORT' | 'SPREAD';
 
-export type GuardPolicy = 'INTERCEPT_THREATS' | 'ESCORT_LOADED_MINER' | 'SPREAD_IN_LASSO';
-export type HarvesterPolicy = 'MINE_AND_BANK' | 'PROTECT_LOADED_MINER' | 'SPREAD_IN_LASSO';
+export type GuardPolicy = 'INTERCEPT_THREATS' | 'ESCORT_LOADED_MINER' | 'SPREAD_FORMATION';
+export type HarvesterPolicy = 'MINE_AND_BANK' | 'PROTECT_LOADED_MINER' | 'SPREAD_FORMATION';
 
 export interface StrategyDefinition {
   id: StrategyId;
@@ -22,16 +22,16 @@ export const STRATEGIES: readonly StrategyDefinition[] = [
   {
     id: 'ESCORT',
     label: 'Guard Escort',
-    description: 'A guard follows each loaded miner inside the guard territory.',
+    description: 'A guard follows each loaded miner inside the guard activity zone.',
     guardPolicy: 'ESCORT_LOADED_MINER',
     harvesterPolicy: 'MINE_AND_BANK',
   },
   {
     id: 'SPREAD',
     label: 'Spread Formation',
-    description: 'Both squads distribute across their own lasso instead of clustering.',
-    guardPolicy: 'SPREAD_IN_LASSO',
-    harvesterPolicy: 'SPREAD_IN_LASSO',
+    description: 'Both squads use a wider formation around their activity centres.',
+    guardPolicy: 'SPREAD_FORMATION',
+    harvesterPolicy: 'SPREAD_FORMATION',
   },
 ];
 

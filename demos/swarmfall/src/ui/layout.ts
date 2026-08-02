@@ -17,24 +17,14 @@ export function getArenaLayout(width: number, height: number): ArenaLayout {
   };
 }
 
-export function getDefaultLasso(
+export function getInitialSquadCenter(
   squad: 'GUARDS' | 'HARVESTERS',
   width: number,
   height: number,
-): Point[] {
+): Point {
   if (squad === 'GUARDS') {
-    return [
-      { x: width * 0.08, y: height * 0.1 },
-      { x: width * 0.92, y: height * 0.1 },
-      { x: width * 0.9, y: height * 0.56 },
-      { x: width * 0.1, y: height * 0.56 },
-    ];
+    return { x: width * 0.34, y: height * 0.34 };
   }
 
-  return [
-    { x: width * 0.1, y: height * 0.52 },
-    { x: width * 0.9, y: height * 0.52 },
-    { x: width * 0.92, y: height * 0.91 },
-    { x: width * 0.08, y: height * 0.91 },
-  ];
+  return { x: width * 0.66, y: height * 0.68 };
 }

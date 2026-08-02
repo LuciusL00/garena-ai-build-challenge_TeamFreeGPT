@@ -1,36 +1,59 @@
 import type { GameActionBus, Squad } from './actionBus.ts';
+import { BALANCE } from './config/balance.ts';
 import type { StrategyId } from './strategy.ts';
 
-function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent) {
-  const bounds = canvas.getBoundingClientRect();
+interface PointerPosition {
+  x: number;
+  y: number;
+}
+
+function pointerPosition(event: PointerEvent): PointerPosition {
+  return { x: event.clientX, y: event.clientY };
+}
+
+function joystickDirection(origin: PointerPosition, current: PointerPosition) {
+  const delta = { x: current.x - origin.x, y: current.y - origin.y };
+  const distance = Math.hypot(delta.x, delta.y);
+  if (distance <= BALANCE.joystickDeadZonePx) return { x: 0, y: 0 };
+
+  const magnitude = Math.min(
+    1,
+    (distance - BALANCE.joystickDeadZonePx) /
+      (BALANCE.joystickMaxDragPx - BALANCE.joystickDeadZonePx),
+  );
   return {
-    x: ((event.clientX - bounds.left) / bounds.width) * canvas.clientWidth,
-    y: ((event.clientY - bounds.top) / bounds.height) * canvas.clientHeight,
+    x: (delta.x / distance) * magnitude,
+    y: (delta.y / distance) * magnitude,
   };
 }
 
 export function wireCanvasInput(canvas: HTMLCanvasElement, bus: GameActionBus): () => void {
   let activePointer: number | null = null;
+  let origin: PointerPosition | null = null;
 
   const onPointerDown = (event: PointerEvent) => {
     if (activePointer !== null) return;
     activePointer = event.pointerId;
+    origin = pointerPosition(event);
     canvas.setPointerCapture(event.pointerId);
     event.preventDefault();
-    bus.emit('LASSO_START', { point: canvasPoint(canvas, event) });
+    bus.emit('MOVE_SQUAD_DIRECTION', { direction: { x: 0, y: 0 } });
   };
 
   const onPointerMove = (event: PointerEvent) => {
-    if (activePointer !== event.pointerId) return;
+    if (activePointer !== event.pointerId || !origin) return;
     event.preventDefault();
-    bus.emit('LASSO_POINT', { point: canvasPoint(canvas, event) });
+    bus.emit('MOVE_SQUAD_DIRECTION', {
+      direction: joystickDirection(origin, pointerPosition(event)),
+    });
   };
 
   const finish = (event: PointerEvent) => {
     if (activePointer !== event.pointerId) return;
     event.preventDefault();
-    bus.emit('LASSO_END', { point: canvasPoint(canvas, event) });
+    bus.emit('STOP_SQUAD_MOVEMENT', {});
     activePointer = null;
+    origin = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   };
 
