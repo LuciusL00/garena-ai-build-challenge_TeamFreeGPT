@@ -43,6 +43,12 @@ export interface SwarmfallBindingSettingsView {
   sources: readonly BindingSourceView[];
   selectedSource: InputSourceId | null;
   preview: BindingChangePreview<GameAction> | null;
+  stage: 'CHOOSE' | 'PREPARE' | 'REVIEW';
+}
+
+export interface CalibrationRequest {
+  action: GameAction;
+  source: InputSourceId;
 }
 
 export interface SwarmfallAdaptiveCallbacks {
@@ -50,6 +56,7 @@ export interface SwarmfallAdaptiveCallbacks {
   onNotice(message: string, isError: boolean): void;
   onSettingsChanged(view: SwarmfallBindingSettingsView): void;
   onSettingsVisibilityChanged(open: boolean): void;
+  onCalibrationRequested(request: CalibrationRequest): void;
   onVisionStatus(status: VisionStatus, detail?: string): void;
 }
 
@@ -65,6 +72,7 @@ export class SwarmfallAdaptiveInput {
   private visionStatus: VisionStatus = 'IDLE';
   private selectedAction: GameAction = SWARMFALL_ACTION_CATALOG[0].id;
   private selectedSource: InputSourceId | null = null;
+  private stage: SwarmfallBindingSettingsView['stage'] = 'CHOOSE';
 
   constructor(
     gameBus: GameActionBus,
@@ -111,6 +119,21 @@ export class SwarmfallAdaptiveInput {
 
   openSettings(): void {
     this.selectedSource = null;
+    this.stage = 'CHOOSE';
+    this.refreshSettings();
+    this.callbacks.onSettingsVisibilityChanged(true);
+  }
+
+  openPendingSettings(actionId: string, sourceId: string): void {
+    const action = this.settings.actions().find((candidate) => candidate.id === actionId);
+    if (!action) return;
+    const source = this.settings
+      .sourcesFor(action.id)
+      .find((candidate) => candidate.id === sourceId && !candidate.isCurrent);
+    if (!source) return;
+    this.selectedAction = action.id;
+    this.selectedSource = source.id;
+    this.stage = this.currentPreview()?.readyToApply ? 'REVIEW' : 'PREPARE';
     this.refreshSettings();
     this.callbacks.onSettingsVisibilityChanged(true);
   }
@@ -124,6 +147,7 @@ export class SwarmfallAdaptiveInput {
     if (!action) return;
     this.selectedAction = action.id;
     this.selectedSource = null;
+    this.stage = 'CHOOSE';
     this.refreshSettings();
   }
 
@@ -133,12 +157,39 @@ export class SwarmfallAdaptiveInput {
       .find((candidate) => candidate.id === sourceId);
     if (!source || source.isCurrent) return;
     this.selectedSource = source.id;
+    this.stage = 'PREPARE';
     this.refreshSettings();
+  }
+
+  reviewSelectedBinding(): void {
+    const preview = this.currentPreview();
+    if (!preview?.readyToApply) {
+      this.callbacks.onNotice('Complete the input test before reviewing this change.', true);
+      return;
+    }
+    this.stage = 'REVIEW';
+    this.refreshSettings();
+  }
+
+  startSelectedCalibration(): void {
+    if (this.selectedSource === null) return;
+    this.callbacks.onCalibrationRequested({
+      action: this.selectedAction,
+      source: this.selectedSource,
+    });
+  }
+
+  keepCurrentBinding(): void {
+    this.selectedSource = null;
+    this.stage = 'CHOOSE';
+    this.callbacks.onNotice('Current input kept. No binding was changed.', false);
+    this.refreshSettings();
+    this.closeSettings();
   }
 
   async confirmSelectedBinding(): Promise<void> {
     const preview = this.currentPreview();
-    if (!preview?.readyToApply) {
+    if (this.stage !== 'REVIEW' || !preview?.readyToApply) {
       this.callbacks.onNotice('Complete the input test before changing this control.', true);
       return;
     }
@@ -151,6 +202,7 @@ export class SwarmfallAdaptiveInput {
     this.settings.confirm(preview, true);
     if (!preview.requiresCamera) this.vision.stop();
     this.selectedSource = null;
+    this.stage = 'CHOOSE';
     this.callbacks.onNotice(`${preview.toLabel} now controls ${preview.actionLabel}.`, false);
     this.refreshSettings();
   }
@@ -158,6 +210,7 @@ export class SwarmfallAdaptiveInput {
   resetSelectedBinding(): void {
     this.settings.reset(this.selectedAction);
     this.selectedSource = null;
+    this.stage = 'CHOOSE';
     if (!this.hasVisionBinding()) this.vision.stop();
     this.callbacks.onNotice('Original touch control restored.', false);
     this.refreshSettings();
@@ -172,6 +225,7 @@ export class SwarmfallAdaptiveInput {
       sources,
       selectedSource: this.selectedSource,
       preview: this.currentPreview(),
+      stage: this.stage,
     });
   }
 

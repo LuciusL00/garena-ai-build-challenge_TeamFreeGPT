@@ -7,6 +7,9 @@ export interface AdaptiveUiActions {
   closeSettings(): void;
   selectSettingsAction(actionId: string): void;
   selectSettingsSource(sourceId: string): void;
+  reviewSelectedBinding(): void;
+  startSelectedCalibration(): void;
+  keepCurrentBinding(): void;
   confirmSelectedBinding(): Promise<void>;
   resetSelectedBinding(): void;
 }
@@ -87,6 +90,9 @@ export function wireUiInput(
     if (action === 'switch-squad') adaptive.attemptTouchToggle();
     if (action === 'open-adaptive-settings') adaptive.openSettings();
     if (action === 'close-adaptive-settings') adaptive.closeSettings();
+    if (action === 'review-adaptive-binding') adaptive.reviewSelectedBinding();
+    if (action === 'start-adaptive-calibration') adaptive.startSelectedCalibration();
+    if (action === 'keep-current-binding') adaptive.keepCurrentBinding();
     if (action === 'confirm-adaptive-binding') void adaptive.confirmSelectedBinding();
     if (action === 'reset-adaptive-binding') adaptive.resetSelectedBinding();
   };

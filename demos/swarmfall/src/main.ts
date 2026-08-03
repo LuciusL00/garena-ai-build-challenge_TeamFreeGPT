@@ -109,9 +109,11 @@ interface UiRefs {
   settingsSourceList: HTMLElement;
   settingsRecommendation: HTMLElement;
   settingsComparison: HTMLElement;
+  settingsTest: HTMLButtonElement;
+  settingsReview: HTMLButtonElement;
+  settingsKeep: HTMLButtonElement;
   settingsConfirm: HTMLButtonElement;
   settingsReset: HTMLButtonElement;
-  settingsCalibrationLink: HTMLAnchorElement;
   visionStatus: HTMLElement;
   visionDetail: HTMLElement;
   cameraVideo: HTMLVideoElement;
@@ -1021,11 +1023,13 @@ function createUi(root: HTMLElement): UiRefs {
               <div class="settings-source-list" id="settings-source-list" aria-label="Compatible inputs"></div>
               <div class="settings-recommendation" id="settings-recommendation">Choose an alternative input to compare it with the current control.</div>
               <div class="settings-comparison" id="settings-comparison" hidden></div>
-              <a class="calibration-link" id="settings-calibration-link" href="/calibration" hidden>Test and compare these inputs</a>
               <div class="settings-buttons">
-                <button class="secondary" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore original</button>
-                <button class="primary" id="settings-confirm" type="button" data-action="confirm-adaptive-binding" disabled>Use alternative input</button>
+                <button class="secondary" id="settings-test" type="button" data-action="start-adaptive-calibration" hidden>Test inputs</button>
+                <button class="secondary" id="settings-review" type="button" data-action="review-adaptive-binding" hidden>Review saved results</button>
+                <button class="secondary" id="settings-keep" type="button" data-action="keep-current-binding" hidden>Keep current input</button>
+                <button class="primary" id="settings-confirm" type="button" data-action="confirm-adaptive-binding" hidden>Use alternative input</button>
               </div>
+              <button class="restore-default" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore game default</button>
               <div class="vision-readout">
                 <span><span class="label">Visual input</span> <strong id="vision-status">Off</strong></span>
                 <span id="vision-detail">Camera starts only after you approve a camera-based input.</span>
@@ -1067,9 +1071,11 @@ function createUi(root: HTMLElement): UiRefs {
     settingsSourceList: query('#settings-source-list'),
     settingsRecommendation: query('#settings-recommendation'),
     settingsComparison: query('#settings-comparison'),
+    settingsTest: query<HTMLButtonElement>('#settings-test'),
+    settingsReview: query<HTMLButtonElement>('#settings-review'),
+    settingsKeep: query<HTMLButtonElement>('#settings-keep'),
     settingsConfirm: query<HTMLButtonElement>('#settings-confirm'),
     settingsReset: query<HTMLButtonElement>('#settings-reset'),
-    settingsCalibrationLink: query<HTMLAnchorElement>('#settings-calibration-link'),
     visionStatus: query('#vision-status'),
     visionDetail: query('#vision-detail'),
     cameraVideo: query<HTMLVideoElement>('#adaptive-camera'),
@@ -1123,32 +1129,44 @@ function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): 
   const preview = view.preview;
   ui.settingsComparison.replaceChildren();
   ui.settingsComparison.hidden = true;
-  ui.settingsCalibrationLink.hidden = true;
-  ui.settingsConfirm.disabled = true;
+  ui.settingsTest.hidden = true;
+  ui.settingsReview.hidden = true;
+  ui.settingsKeep.hidden = true;
+  ui.settingsConfirm.hidden = true;
   ui.settingsConfirm.textContent = 'Use alternative input';
 
   if (!preview) {
     ui.settingsRecommendation.textContent =
       'Choose another input to compare it with the current control.';
-  } else if (preview.recommendation.verdict === 'needs-calibration') {
-    const missingLabels = preview.recommendation.missing.map((source) =>
-      view.sources.find((candidate) => candidate.id === source)?.label ?? source,
-    );
-    ui.settingsRecommendation.textContent =
-      `Test ${missingLabels.join(' and ')} before deciding whether to change this control.`;
-    ui.settingsCalibrationLink.hidden = false;
   } else {
-    const conflict = preview.conflicts.length > 0
-      ? ` It will replace ${preview.conflicts.map((item) => item.label).join(', ')} in this context.`
-      : '';
-    ui.settingsRecommendation.textContent =
-      `${recommendationLabel(preview.recommendation.verdict)}: ${preview.recommendation.explanation}${conflict}`;
-    renderComparison(ui.settingsComparison, preview);
-    ui.settingsComparison.hidden = false;
-    ui.settingsConfirm.disabled = false;
-    ui.settingsConfirm.textContent = preview.conflicts.length > 0
-      ? `Replace and use ${preview.toLabel}`
-      : `Use ${preview.toLabel}`;
+    ui.settingsKeep.hidden = false;
+    ui.settingsTest.hidden = false;
+    if (preview.recommendation.verdict === 'needs-calibration') {
+      const missingLabels = preview.recommendation.missing.map((source) =>
+        view.sources.find((candidate) => candidate.id === source)?.label ?? source,
+      );
+      ui.settingsRecommendation.textContent =
+        `Test ${missingLabels.join(' and ')} before deciding whether to change this control.`;
+      ui.settingsTest.textContent = 'Start input test';
+    } else if (view.stage === 'PREPARE') {
+      ui.settingsRecommendation.textContent =
+        `Saved results are available from ${formatSavedResultDate(preview)}. Review them or test again.`;
+      ui.settingsTest.textContent = 'Test again';
+      ui.settingsReview.hidden = false;
+    } else {
+      const conflict = preview.conflicts.length > 0
+        ? ` It will replace ${preview.conflicts.map((item) => item.label).join(', ')} in this context.`
+        : '';
+      ui.settingsRecommendation.textContent =
+        `${recommendationLabel(preview.recommendation.verdict)}: ${preview.recommendation.explanation}${conflict}`;
+      renderComparison(ui.settingsComparison, preview);
+      ui.settingsComparison.hidden = false;
+      ui.settingsTest.textContent = 'Test again';
+      ui.settingsConfirm.hidden = false;
+      ui.settingsConfirm.textContent = preview.conflicts.length > 0
+        ? `Replace and use ${preview.toLabel}`
+        : `Use ${preview.toLabel}`;
+    }
   }
 
   const changedActions = view.actions.filter(
@@ -1236,6 +1254,17 @@ function recommendationLabel(verdict: string): string {
   return 'Retest recommended';
 }
 
+function formatSavedResultDate(
+  preview: NonNullable<SwarmfallBindingSettingsView['preview']>,
+): string {
+  if (preview.recommendation.verdict === 'needs-calibration') return 'an earlier test';
+  const oldestResult = Math.min(
+    preview.recommendation.evidence.current.recordedAt,
+    preview.recommendation.evidence.alternative.recordedAt,
+  );
+  return new Date(oldestResult).toLocaleString();
+}
+
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('App root is missing.');
 const ui = createUi(root);
@@ -1260,6 +1289,15 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
   onSettingsVisibilityChanged: (open) => {
     ui.settingsLayer.toggleAttribute('hidden', !open);
   },
+  onCalibrationRequested: ({ action, source }) => {
+    const returnQuery = new URLSearchParams({
+      adaptiveControls: 'review',
+      action,
+      source,
+    });
+    const calibrationQuery = new URLSearchParams({ return: `/?${returnQuery.toString()}` });
+    window.location.assign(`/calibration?${calibrationQuery.toString()}`);
+  },
   onVisionStatus: (status, detail) => {
     const labels: Record<typeof status, string> = {
       IDLE: 'Off',
@@ -1275,6 +1313,13 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
     ui.inputIndicator.classList.toggle('active', status === 'READY');
   },
 });
+const pendingSettings = new URLSearchParams(window.location.search);
+if (pendingSettings.get('adaptiveControls') === 'review') {
+  const action = pendingSettings.get('action');
+  const source = pendingSettings.get('source');
+  if (action && source) adaptive.openPendingSettings(action, source);
+  window.history.replaceState(null, '', '/');
+}
 wireUiInput(root, bus, adaptive);
 wireCanvasInput(canvas, bus);
 const game = new SwarmfallGame(canvas, bus, ui);

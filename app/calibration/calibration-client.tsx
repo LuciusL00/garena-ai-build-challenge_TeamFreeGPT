@@ -63,8 +63,15 @@ export default function CalibrationClient() {
     'Quick test uses six prompts. Choose Full test for twelve.',
   );
   const [scores, setScores] = useState<readonly ChannelScore[]>([]);
+  const [returnHref, setReturnHref] = useState('/');
 
   useEffect(() => {
+    setReturnHref(
+      safeReturnPath(
+        new URLSearchParams(window.location.search).get('return'),
+        window.location.origin,
+      ),
+    );
     storeRef.current = new CalibrationProfileStore(window.localStorage);
     profileRef.current = storeRef.current.load();
     setScores(profileRef.current.all());
@@ -232,7 +239,7 @@ export default function CalibrationClient() {
   return (
     <main className="calibration-lab">
       <header className="lab-header">
-        <a href="/" data-calibration-control>← Swarmfall</a>
+        <a href={returnHref} data-calibration-control>← Back to controls</a>
         <span>CONTROL SETUP</span>
         <h1>Input Performance Test</h1>
         <p>
@@ -305,9 +312,25 @@ export default function CalibrationClient() {
           <strong>{recommendation.explanation}</strong>
           <small>Your controls have not been changed. You keep the final choice.</small>
         </div>
+        {touchScore && fistScore && (
+          <a className="review-binding" href={returnHref} data-calibration-control>
+            Review binding decision
+          </a>
+        )}
       </section>
     </main>
   );
+}
+
+function safeReturnPath(requested: string | null, origin: string): string {
+  if (!requested) return '/';
+  try {
+    const parsed = new URL(requested, origin);
+    if (parsed.origin !== origin) return '/';
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return '/';
+  }
 }
 
 function findScore(

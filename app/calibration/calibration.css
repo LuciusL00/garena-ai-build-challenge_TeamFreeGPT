@@ -68,6 +68,7 @@
 .recommendation.keep { border-color: #5b7180; }
 .recommendation.trade-off { border-color: #98712f; background: rgba(117, 82, 24, .16); }
 .recommendation.retest { border-color: #91404b; background: rgba(114, 43, 53, .15); }
+.review-binding { display: inline-flex; align-items: center; min-height: 46px; margin-top: 14px; padding: 10px 16px; border-radius: 10px; color: #061016; background: var(--green); font-weight: 800; text-decoration: none; }
 @media (max-width: 760px) {
   .calibration-lab { padding-top: 20px; }
   .lab-grid { grid-template-columns: 1fr; }

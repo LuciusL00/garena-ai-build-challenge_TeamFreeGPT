@@ -84,6 +84,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-buttons button { min-height: 44px; padding: 8px; font-weight: 700; cursor: pointer; }
 .settings-buttons .secondary { border: 1px solid var(--line); color: var(--text); background: var(--panel-2); }
 .settings-buttons .primary { border: 1px solid var(--lime); color: #10200d; background: var(--lime); }
+.restore-default { justify-self: start; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .vision-readout { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
 .vision-readout strong { color: var(--text); }
 .input-processing-video { position: fixed; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
