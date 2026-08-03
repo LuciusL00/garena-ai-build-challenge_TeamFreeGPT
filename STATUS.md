@@ -33,10 +33,11 @@ adaptive-input layer is the product.
 | Pushed prototype | Vivin's cleaned source on `vision/calibration-prototype` at `b910147` |
 | Manually checked | Vivin's browser prototype detects a closed fist and reports a live point vector |
 | Local review change | Lucius's fallback Swarmfall now uses continuous directional control: release stops; switching squads transfers the active direction |
-| Feature branch | Neutral task scores, persistent calibration profile and comparison-first recommendations on `core/adaptive-input-skeleton` pass executable checks; `/calibration` compares touch/fist using 6-trial demo or 12-trial full modes and counts WAIT activations |
+| Pushed for review | Scoring and recommendation are implemented on `core/adaptive-input-skeleton`: neutral task scores, persistent calibration profiles and comparison-first recommendations pass executable checks |
+| Pushed for review | `/calibration` compares touch/fist using 6-trial quick or 12-trial full tests and counts accidental activations during WAIT |
 | Pending | Mark exports the canonical Swarmfall source and publishes the real action/payload table |
 | Pending | Vivin's detector is ported behind the middleware `InputChannel` contract |
-| Pending | Review the calibration integration, then add approval, live rebind and before/after validation |
+| Pending | Add explicit player approval, live rebind and before/after validation using the completed scorer and recommender |
 | Pending | Real-phone HTTPS testing, camera-denial fallback and final integration |
 
 The local directional host is a temporary test object while Mark is unavailable. It must not be
@@ -54,13 +55,14 @@ treated as Mark's canonical game or merged over his work without review.
 
 ### Lucius — Core & Touch
 
-1. Get the current plan/status reviewed, then commit only the approved changes.
+1. Get the pushed core/calibration feature branch reviewed before merging it into an integration branch.
 2. Ask Mark for the canonical action list before choosing the final T0 command.
 3. Keep the middleware contract game-agnostic: it sends an action and typed payload, never worker
    instructions.
 4. Port one normal touch control behind `InputChannel` and calibrate it with the same cue task used
    for fist.
-5. Add scoring, recommendation, explicit Accept/Reject, live rebind and before/after results.
+5. Use the completed scorer and recommender to add explicit Accept/Reject, live rebind and
+   before/after results.
 6. Use the local directional Swarmfall only as the integration host until Mark's code is ready.
 
 ### Vivin — Vision
@@ -112,7 +114,7 @@ three parts needs to understand the internals of the other two.
 
 | Tier | Contents | Status |
 |---|---|---|
-| **T0** | One discrete live rebind, touch + fist calibration, recommendation, approval, before/after and mobile HTTPS demo | Must ship; not yet end to end |
+| **T0** | One discrete live rebind, touch + fist calibration, recommendation, approval, before/after and mobile HTTPS demo | Core, calibration, scoring and recommendation complete; live rebind not yet end to end |
 | **T1** | Point-direction mapping, direction calibration and additional allowlisted mappings | Conditional after T0 |
 | **T2** | Second host proving portability | Conditional |
 | **T3** | Extra gesture, face or tilt channels | Conditional |
