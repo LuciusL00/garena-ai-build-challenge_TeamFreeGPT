@@ -1,6 +1,14 @@
 import type { GameActionBus, Squad } from './actionBus.ts';
 import type { StrategyId } from './strategy.ts';
 
+export interface AdaptiveUiActions {
+  attemptTouchToggle(): void;
+  enableVisualInput(): Promise<void>;
+  stopVisualInput(): void;
+  useTouch(): void;
+  useClosedFist(): void;
+}
+
 function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent) {
   const bounds = canvas.getBoundingClientRect();
   return {
@@ -47,7 +55,11 @@ export function wireCanvasInput(canvas: HTMLCanvasElement, bus: GameActionBus): 
   };
 }
 
-export function wireUiInput(root: HTMLElement, bus: GameActionBus): () => void {
+export function wireUiInput(
+  root: HTMLElement,
+  bus: GameActionBus,
+  adaptive: AdaptiveUiActions,
+): () => void {
   const onClick = (event: Event) => {
     const eventTarget = event.target;
     if (!(eventTarget instanceof HTMLElement)) return;
@@ -60,9 +72,15 @@ export function wireUiInput(root: HTMLElement, bus: GameActionBus): () => void {
     const strategyId = target.dataset.strategy as StrategyId | undefined;
     if (strategyId) bus.emit('SELECT_STRATEGY', { strategyId });
 
-    if (target.dataset.action === 'activate-strategy') bus.emit('ACTIVATE_STRATEGY', {});
-    if (target.dataset.action === 'begin-round') bus.emit('BEGIN_ROUND', {});
-    if (target.dataset.action === 'restart-round') bus.emit('RESTART_ROUND', {});
+    const action = target.dataset.action;
+    if (action === 'activate-strategy') bus.emit('ACTIVATE_STRATEGY', {});
+    if (action === 'begin-round') bus.emit('BEGIN_ROUND', {});
+    if (action === 'restart-round') bus.emit('RESTART_ROUND', {});
+    if (action === 'switch-squad') adaptive.attemptTouchToggle();
+    if (action === 'enable-visual-input') void adaptive.enableVisualInput();
+    if (action === 'stop-visual-input') adaptive.stopVisualInput();
+    if (action === 'use-touch') adaptive.useTouch();
+    if (action === 'use-closed-fist') adaptive.useClosedFist();
   };
 
   root.addEventListener('click', onClick);

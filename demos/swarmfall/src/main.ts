@@ -1,4 +1,5 @@
 import './style.css';
+import { SwarmfallAdaptiveInput, type AdaptiveAttemptFeedback } from './adaptiveInput.ts';
 import { GameActionBus, type Squad } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import { wireCanvasInput, wireUiInput } from './input.ts';
@@ -88,6 +89,13 @@ interface UiRefs {
   resultPanel: HTMLElement;
   resultScore: HTMLElement;
   resultMessage: HTMLElement;
+  selectedSquad: HTMLElement;
+  adaptiveBinding: HTMLElement;
+  adaptiveAttempt: HTMLElement;
+  visionStatus: HTMLElement;
+  visionDetail: HTMLElement;
+  cameraVideo: HTMLVideoElement;
+  bindingButtons: NodeListOf<HTMLButtonElement>;
   squadButtons: NodeListOf<HTMLButtonElement>;
   strategyButtons: NodeListOf<HTMLButtonElement>;
 }
@@ -359,6 +367,12 @@ class SwarmfallGame {
     this.bus.on('SELECT_SQUAD', ({ squad }) => {
       this.selectedSquad = squad;
       this.showToast(`${squad === 'GUARDS' ? 'Guards' : 'Harvesters'} selected`);
+      this.updateUi(true);
+    });
+    this.bus.on('TOGGLE_SQUAD', () => {
+      this.selectedSquad = this.selectedSquad === 'GUARDS' ? 'HARVESTERS' : 'GUARDS';
+      this.drawingPath = null;
+      this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} selected`);
       this.updateUi(true);
     });
     this.bus.on('LASSO_START', ({ point }) => {
@@ -680,6 +694,7 @@ class SwarmfallGame {
     this.ui.swarmStatus.textContent = this.state.status === 'PLAYING' ? 'AUTONOMY ENGAGED' : this.state.status;
     this.ui.activeStrategy.textContent = strategy.label;
     this.ui.strategyHint.textContent = `Pending: ${pending.label}`;
+    this.ui.selectedSquad.textContent = this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters';
     this.ui.squadButtons.forEach((button) => button.classList.toggle('active', button.dataset.squad === this.selectedSquad));
     this.ui.squadButtons.forEach((button) => button.classList.toggle('guard', button.dataset.squad === 'GUARDS'));
     this.ui.squadButtons.forEach((button) => button.classList.toggle('harvester', button.dataset.squad === 'HARVESTERS'));
@@ -956,6 +971,32 @@ function createUi(root: HTMLElement): UiRefs {
             <button class="command active guard" type="button" data-squad="GUARDS">GUARDS<span class="microcopy">Intercept + repel</span></button>
             <button class="command harvester" type="button" data-squad="HARVESTERS">HARVESTERS<span class="microcopy">Extract + bank</span></button>
           </div>
+          <section class="adaptive-control" aria-label="Alternative input for switching squads">
+            <div>
+              <h2 class="panel-title">Squad switch input</h2>
+              <p class="panel-copy">Keep touch, or enable the camera and assign closed fist to the same squad-switch action.</p>
+            </div>
+            <div class="adaptive-readout">
+              <span class="label">Selected squad</span><strong id="selected-squad">Guards</strong>
+              <span class="label">Current input</span><strong id="adaptive-binding">Touch button</strong>
+            </div>
+            <button class="switch-squad" type="button" data-action="switch-squad">Switch squad</button>
+            <div class="binding-options" aria-label="Choose squad switch input">
+              <button class="binding-option active" type="button" data-action="use-touch" data-input-source="TOUCH_BUTTON">Use touch</button>
+              <button class="binding-option" type="button" data-action="use-closed-fist" data-input-source="HAND_CLOSED_FIST">Use closed fist</button>
+            </div>
+            <video class="camera-preview" id="adaptive-camera" muted playsinline aria-label="Visual input camera preview"></video>
+            <div class="camera-actions">
+              <button type="button" data-action="enable-visual-input">Enable visual input</button>
+              <button type="button" data-action="stop-visual-input">Stop camera</button>
+            </div>
+            <div class="adaptive-status">
+              <span><span class="label">Camera</span> <strong id="vision-status">Off</strong></span>
+              <span id="vision-detail">Camera is off. Touch remains available.</span>
+              <span id="adaptive-attempt" role="status" aria-live="polite">No squad-switch attempts yet.</span>
+            </div>
+            <a class="calibration-link" href="/calibration">Test and compare inputs</a>
+          </section>
           <h2 class="panel-title">Native strategy</h2>
           <p class="panel-copy">These policies are built into the game. Later, natural language can select one safely.</p>
           <div class="strategy-list">
@@ -989,6 +1030,13 @@ function createUi(root: HTMLElement): UiRefs {
     resultPanel: query('#result-panel'),
     resultScore: query('#result-score'),
     resultMessage: query('#result-message'),
+    selectedSquad: query('#selected-squad'),
+    adaptiveBinding: query('#adaptive-binding'),
+    adaptiveAttempt: query('#adaptive-attempt'),
+    visionStatus: query('#vision-status'),
+    visionDetail: query('#vision-detail'),
+    cameraVideo: query<HTMLVideoElement>('#adaptive-camera'),
+    bindingButtons: root.querySelectorAll<HTMLButtonElement>('[data-input-source]'),
     squadButtons: root.querySelectorAll<HTMLButtonElement>('[data-squad]'),
     strategyButtons: root.querySelectorAll<HTMLButtonElement>('[data-strategy]'),
   };
@@ -1000,7 +1048,43 @@ const ui = createUi(root);
 const canvas = root.querySelector<HTMLCanvasElement>('#arena');
 if (!canvas) throw new Error('Arena canvas is missing.');
 const bus = new GameActionBus();
-wireUiInput(root, bus);
+const showAttempt = (feedback: AdaptiveAttemptFeedback): void => {
+  const confidence = feedback.confidence === undefined
+    ? ''
+    : ` (${Math.round(feedback.confidence * 100)}% confidence)`;
+  ui.adaptiveAttempt.textContent = `${feedback.sourceLabel}${confidence}: ${feedback.accepted ? 'accepted' : `rejected — currently using ${feedback.bindingLabel}`}.`;
+  ui.adaptiveAttempt.classList.toggle('accepted', feedback.accepted);
+  ui.adaptiveAttempt.classList.toggle('rejected', !feedback.accepted);
+};
+const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
+  onAttempt: showAttempt,
+  onBindingChanged: (source, label) => {
+    ui.adaptiveBinding.textContent = label;
+    ui.bindingButtons.forEach((button) => {
+      button.classList.toggle('active', button.dataset.inputSource === source);
+    });
+  },
+  onBindingUnavailable: (message) => {
+    ui.adaptiveAttempt.textContent = message;
+    ui.adaptiveAttempt.classList.remove('accepted');
+    ui.adaptiveAttempt.classList.add('rejected');
+  },
+  onVisionStatus: (status, detail) => {
+    const labels: Record<typeof status, string> = {
+      IDLE: 'Off',
+      REQUESTING: 'Permission requested',
+      LOADING: 'Loading',
+      READY: 'Ready',
+      DENIED: 'Permission denied',
+      UNAVAILABLE: 'Unavailable',
+      ERROR: 'Error',
+    };
+    ui.visionStatus.textContent = labels[status];
+    ui.visionDetail.textContent = detail ?? '';
+    ui.cameraVideo.classList.toggle('ready', status === 'READY');
+  },
+});
+wireUiInput(root, bus, adaptive);
 wireCanvasInput(canvas, bus);
 const game = new SwarmfallGame(canvas, bus, ui);
 const resizeObserver = new ResizeObserver(() => game.resize());
