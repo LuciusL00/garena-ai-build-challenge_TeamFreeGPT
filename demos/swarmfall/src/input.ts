@@ -1,12 +1,14 @@
-import type { GameActionBus, Squad } from './actionBus.ts';
+import type { GameActionBus } from './actionBus.ts';
 import type { StrategyId } from './strategy.ts';
 
 export interface AdaptiveUiActions {
   attemptTouchToggle(): void;
-  enableVisualInput(): Promise<void>;
-  stopVisualInput(): void;
-  useTouch(): void;
-  useClosedFist(): void;
+  openSettings(): void;
+  closeSettings(): void;
+  selectSettingsAction(actionId: string): void;
+  selectSettingsSource(sourceId: string): void;
+  confirmSelectedBinding(): Promise<void>;
+  resetSelectedBinding(): void;
 }
 
 function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent) {
@@ -63,24 +65,30 @@ export function wireUiInput(
   const onClick = (event: Event) => {
     const eventTarget = event.target;
     if (!(eventTarget instanceof HTMLElement)) return;
-    const target = eventTarget.closest<HTMLElement>('[data-squad], [data-strategy], [data-action]');
+    const target = eventTarget.closest<HTMLElement>(
+      '[data-strategy], [data-action], [data-binding-action], [data-input-source]',
+    );
     if (!target) return;
-
-    const squad = target.dataset.squad as Squad | undefined;
-    if (squad) bus.emit('SELECT_SQUAD', { squad });
 
     const strategyId = target.dataset.strategy as StrategyId | undefined;
     if (strategyId) bus.emit('SELECT_STRATEGY', { strategyId });
+
+    if (target.dataset.bindingAction) {
+      adaptive.selectSettingsAction(target.dataset.bindingAction);
+    }
+    if (target.dataset.inputSource) {
+      adaptive.selectSettingsSource(target.dataset.inputSource);
+    }
 
     const action = target.dataset.action;
     if (action === 'activate-strategy') bus.emit('ACTIVATE_STRATEGY', {});
     if (action === 'begin-round') bus.emit('BEGIN_ROUND', {});
     if (action === 'restart-round') bus.emit('RESTART_ROUND', {});
     if (action === 'switch-squad') adaptive.attemptTouchToggle();
-    if (action === 'enable-visual-input') void adaptive.enableVisualInput();
-    if (action === 'stop-visual-input') adaptive.stopVisualInput();
-    if (action === 'use-touch') adaptive.useTouch();
-    if (action === 'use-closed-fist') adaptive.useClosedFist();
+    if (action === 'open-adaptive-settings') adaptive.openSettings();
+    if (action === 'close-adaptive-settings') adaptive.closeSettings();
+    if (action === 'confirm-adaptive-binding') void adaptive.confirmSelectedBinding();
+    if (action === 'reset-adaptive-binding') adaptive.resetSelectedBinding();
   };
 
   root.addEventListener('click', onClick);

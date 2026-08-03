@@ -42,3 +42,4 @@ export * from './calibration/scoreCalibration.ts';
 export * from './profile.ts';
 export * from './recommendation/types.ts';
 export * from './recommendation/recommender.ts';
+export * from './settings.ts';

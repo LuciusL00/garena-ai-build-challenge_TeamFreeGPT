@@ -2,6 +2,7 @@
 
 import {
   AdaptiveInput,
+  BindingSettingsController,
   CalibrationProfile,
   CalibrationProfileStore,
   ChannelManager,
@@ -388,6 +389,70 @@ async function main(): Promise<void> {
       clearlyBetterProfile,
     ).verdict === 'swap',
   );
+
+  console.log('\nBinding settings controller');
+  const settings = new BindingSettingsController(
+    adaptive,
+    [
+      {
+        id: 'TOGGLE_SQUAD',
+        label: 'Switch squad',
+        description: 'Changes the selected squad.',
+        context: 'GAMEPLAY',
+        requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
+        defaultSource: InputSourceId.TOUCH_BUTTON,
+        remappable: true,
+      },
+    ],
+    [
+      {
+        id: InputSourceId.TOUCH_BUTTON,
+        label: 'Touch button',
+        tasks: ['TRIGGER'],
+        scope: 'TARGETED',
+        requiresCamera: false,
+      },
+      {
+        id: InputSourceId.HAND_CLOSED_FIST,
+        label: 'Closed fist',
+        tasks: ['TRIGGER'],
+        scope: 'GLOBAL',
+        requiresCamera: true,
+      },
+      {
+        id: InputSourceId.HAND_POINT_DIRECTION,
+        label: 'Point direction',
+        tasks: ['DIRECTION'],
+        scope: 'GLOBAL',
+        requiresCamera: true,
+      },
+    ],
+  );
+  check('host action labels are exposed without game imports', settings.actions()[0]?.label === 'Switch squad');
+  check(
+    'settings filters out inputs with the wrong task shape',
+    settings.sourcesFor('TOGGLE_SQUAD').every((source) => source.id !== InputSourceId.HAND_POINT_DIRECTION),
+  );
+  const bindingBeforePreview = adaptive.bindings.get('TOGGLE_SQUAD');
+  const unmeasuredPreview = settings.preview(
+    'TOGGLE_SQUAD',
+    InputSourceId.HAND_CLOSED_FIST,
+    incompleteProfile,
+  );
+  check('binding remains unavailable until both inputs are measured', !unmeasuredPreview.readyToApply);
+  check('preview does not mutate the live binding', adaptive.bindings.get('TOGGLE_SQUAD') === bindingBeforePreview);
+  adaptive.rebind('TOGGLE_SQUAD', InputSourceId.TOUCH_BUTTON);
+  const measuredPreview = settings.preview(
+    'TOGGLE_SQUAD',
+    InputSourceId.HAND_CLOSED_FIST,
+    clearlyBetterProfile,
+  );
+  check('measured binding is ready for explicit approval', measuredPreview.readyToApply);
+  check('preparing a recommendation still keeps the original input', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON);
+  settings.confirm(measuredPreview);
+  check('confirmation applies the alternative input', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.HAND_CLOSED_FIST);
+  settings.reset('TOGGLE_SQUAD');
+  check('reset restores the host default', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON);
 
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);

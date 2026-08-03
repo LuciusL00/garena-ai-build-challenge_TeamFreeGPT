@@ -1,5 +1,13 @@
 import './style.css';
-import { SwarmfallAdaptiveInput, type AdaptiveAttemptFeedback } from './adaptiveInput.ts';
+import {
+  SwarmfallAdaptiveInput,
+  type AdaptiveAttemptFeedback,
+  type SwarmfallBindingSettingsView,
+} from './adaptiveInput.ts';
+import type {
+  ChannelScore,
+  MetricComparison,
+} from '../../../packages/adaptive-input/src/index.ts';
 import { GameActionBus, type Squad } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import { wireCanvasInput, wireUiInput } from './input.ts';
@@ -90,13 +98,23 @@ interface UiRefs {
   resultScore: HTMLElement;
   resultMessage: HTMLElement;
   selectedSquad: HTMLElement;
-  adaptiveBinding: HTMLElement;
-  adaptiveAttempt: HTMLElement;
+  inputSummary: HTMLElement;
+  inputActivity: HTMLElement;
+  inputIndicator: HTMLElement;
+  settingsLayer: HTMLElement;
+  settingsActionList: HTMLElement;
+  settingsActionTitle: HTMLElement;
+  settingsActionDescription: HTMLElement;
+  settingsCurrentBinding: HTMLElement;
+  settingsSourceList: HTMLElement;
+  settingsRecommendation: HTMLElement;
+  settingsComparison: HTMLElement;
+  settingsConfirm: HTMLButtonElement;
+  settingsReset: HTMLButtonElement;
+  settingsCalibrationLink: HTMLAnchorElement;
   visionStatus: HTMLElement;
   visionDetail: HTMLElement;
   cameraVideo: HTMLVideoElement;
-  bindingButtons: NodeListOf<HTMLButtonElement>;
-  squadButtons: NodeListOf<HTMLButtonElement>;
   strategyButtons: NodeListOf<HTMLButtonElement>;
 }
 
@@ -695,9 +713,6 @@ class SwarmfallGame {
     this.ui.activeStrategy.textContent = strategy.label;
     this.ui.strategyHint.textContent = `Pending: ${pending.label}`;
     this.ui.selectedSquad.textContent = this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters';
-    this.ui.squadButtons.forEach((button) => button.classList.toggle('active', button.dataset.squad === this.selectedSquad));
-    this.ui.squadButtons.forEach((button) => button.classList.toggle('guard', button.dataset.squad === 'GUARDS'));
-    this.ui.squadButtons.forEach((button) => button.classList.toggle('harvester', button.dataset.squad === 'HARVESTERS'));
     this.ui.strategyButtons.forEach((button) => {
       button.classList.toggle('active', button.dataset.strategy === this.pendingStrategy);
     });
@@ -935,7 +950,13 @@ function createUi(root: HTMLElement): UiRefs {
           <div class="brand">SWARMFALL</div>
           <div class="eyebrow">Extraction Protocol // Native Strategy Host</div>
         </div>
-        <div class="mission">Hold the core. Bank the ore.</div>
+        <div class="topbar-actions">
+          <div class="mission">Hold the core. Bank the ore.</div>
+          <button class="controls-trigger" type="button" data-action="open-adaptive-settings">
+            <span class="input-indicator" id="input-indicator" aria-hidden="true"></span>
+            Controls <strong id="input-summary">Touch button</strong>
+          </button>
+        </div>
       </header>
       <section class="statusbar" aria-label="Mission status">
         <div class="status-cell"><span class="label">Banked ore</span><span class="value" id="score">0000</span></div>
@@ -966,37 +987,9 @@ function createUi(root: HTMLElement): UiRefs {
         </div>
         <aside class="side-panel" aria-label="Swarm commands">
           <h2 class="panel-title">Squad territory</h2>
-          <p class="panel-copy">Select a squad, then draw its lasso. Each squad remembers its own territory.</p>
-          <div class="squad-buttons">
-            <button class="command active guard" type="button" data-squad="GUARDS">GUARDS<span class="microcopy">Intercept + repel</span></button>
-            <button class="command harvester" type="button" data-squad="HARVESTERS">HARVESTERS<span class="microcopy">Extract + bank</span></button>
-          </div>
-          <section class="adaptive-control" aria-label="Alternative input for switching squads">
-            <div>
-              <h2 class="panel-title">Squad switch input</h2>
-              <p class="panel-copy">Keep touch, or enable the camera and assign closed fist to the same squad-switch action.</p>
-            </div>
-            <div class="adaptive-readout">
-              <span class="label">Selected squad</span><strong id="selected-squad">Guards</strong>
-              <span class="label">Current input</span><strong id="adaptive-binding">Touch button</strong>
-            </div>
-            <button class="switch-squad" type="button" data-action="switch-squad">Switch squad</button>
-            <div class="binding-options" aria-label="Choose squad switch input">
-              <button class="binding-option active" type="button" data-action="use-touch" data-input-source="TOUCH_BUTTON">Use touch</button>
-              <button class="binding-option" type="button" data-action="use-closed-fist" data-input-source="HAND_CLOSED_FIST">Use closed fist</button>
-            </div>
-            <video class="camera-preview" id="adaptive-camera" muted playsinline aria-label="Visual input camera preview"></video>
-            <div class="camera-actions">
-              <button type="button" data-action="enable-visual-input">Enable visual input</button>
-              <button type="button" data-action="stop-visual-input">Stop camera</button>
-            </div>
-            <div class="adaptive-status">
-              <span><span class="label">Camera</span> <strong id="vision-status">Off</strong></span>
-              <span id="vision-detail">Camera is off. Touch remains available.</span>
-              <span id="adaptive-attempt" role="status" aria-live="polite">No squad-switch attempts yet.</span>
-            </div>
-            <a class="calibration-link" href="/calibration">Test and compare inputs</a>
-          </section>
+          <p class="panel-copy">Draw a lasso for the selected squad. Each squad remembers its own territory.</p>
+          <div class="squad-readout"><span class="label">Selected squad</span><strong id="selected-squad">Guards</strong></div>
+          <button class="switch-squad" type="button" data-action="switch-squad">Switch squad</button>
           <h2 class="panel-title">Native strategy</h2>
           <p class="panel-copy">These policies are built into the game. Later, natural language can select one safely.</p>
           <div class="strategy-list">
@@ -1007,9 +1000,41 @@ function createUi(root: HTMLElement): UiRefs {
         </aside>
       </main>
       <footer class="bottom-bar">
-        <span class="microcopy">Draw with mouse, stylus or touch // Strategy activation is one game-supported command</span>
+        <span class="microcopy" id="input-activity" role="status" aria-live="polite">Touch controls ready</span>
         <div class="legend"><span class="guard">Guards</span><span class="harvester">Harvesters</span><span class="ore">Core + ore</span></div>
       </footer>
+      <div class="settings-layer" id="adaptive-settings" hidden>
+        <button class="settings-scrim" type="button" data-action="close-adaptive-settings" aria-label="Close controls"></button>
+        <section class="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <header class="settings-header">
+            <div><div class="eyebrow">Controls &amp; accessibility</div><h2 id="settings-title">Input bindings</h2></div>
+            <button type="button" data-action="close-adaptive-settings" aria-label="Close controls">Close</button>
+          </header>
+          <div class="settings-body">
+            <nav class="settings-actions" aria-label="Remappable game actions" id="settings-action-list"></nav>
+            <section class="settings-detail">
+              <div>
+                <h3 id="settings-action-title">Choose an action</h3>
+                <p id="settings-action-description"></p>
+              </div>
+              <div class="current-binding"><span class="label">Current input</span><strong id="settings-current-binding">Touch button</strong></div>
+              <div class="settings-source-list" id="settings-source-list" aria-label="Compatible inputs"></div>
+              <div class="settings-recommendation" id="settings-recommendation">Choose an alternative input to compare it with the current control.</div>
+              <div class="settings-comparison" id="settings-comparison" hidden></div>
+              <a class="calibration-link" id="settings-calibration-link" href="/calibration" hidden>Test and compare these inputs</a>
+              <div class="settings-buttons">
+                <button class="secondary" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore original</button>
+                <button class="primary" id="settings-confirm" type="button" data-action="confirm-adaptive-binding" disabled>Use alternative input</button>
+              </div>
+              <div class="vision-readout">
+                <span><span class="label">Visual input</span> <strong id="vision-status">Off</strong></span>
+                <span id="vision-detail">Camera starts only after you approve a camera-based input.</span>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+      <video class="input-processing-video" id="adaptive-camera" muted playsinline aria-hidden="true" tabindex="-1"></video>
     </div>
   `;
 
@@ -1031,15 +1056,184 @@ function createUi(root: HTMLElement): UiRefs {
     resultScore: query('#result-score'),
     resultMessage: query('#result-message'),
     selectedSquad: query('#selected-squad'),
-    adaptiveBinding: query('#adaptive-binding'),
-    adaptiveAttempt: query('#adaptive-attempt'),
+    inputSummary: query('#input-summary'),
+    inputActivity: query('#input-activity'),
+    inputIndicator: query('#input-indicator'),
+    settingsLayer: query('#adaptive-settings'),
+    settingsActionList: query('#settings-action-list'),
+    settingsActionTitle: query('#settings-action-title'),
+    settingsActionDescription: query('#settings-action-description'),
+    settingsCurrentBinding: query('#settings-current-binding'),
+    settingsSourceList: query('#settings-source-list'),
+    settingsRecommendation: query('#settings-recommendation'),
+    settingsComparison: query('#settings-comparison'),
+    settingsConfirm: query<HTMLButtonElement>('#settings-confirm'),
+    settingsReset: query<HTMLButtonElement>('#settings-reset'),
+    settingsCalibrationLink: query<HTMLAnchorElement>('#settings-calibration-link'),
     visionStatus: query('#vision-status'),
     visionDetail: query('#vision-detail'),
     cameraVideo: query<HTMLVideoElement>('#adaptive-camera'),
-    bindingButtons: root.querySelectorAll<HTMLButtonElement>('[data-input-source]'),
-    squadButtons: root.querySelectorAll<HTMLButtonElement>('[data-squad]'),
     strategyButtons: root.querySelectorAll<HTMLButtonElement>('[data-strategy]'),
   };
+}
+
+function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): void {
+  const selectedAction = view.actions.find((action) => action.id === view.selectedAction);
+  if (!selectedAction) return;
+
+  ui.settingsActionList.replaceChildren(
+    ...view.actions.map((action) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.bindingAction = action.id;
+      button.className = action.id === view.selectedAction ? 'active' : '';
+      const label = document.createElement('strong');
+      label.textContent = action.label;
+      const binding = document.createElement('span');
+      binding.textContent = action.currentSourceLabel;
+      button.append(label, binding);
+      return button;
+    }),
+  );
+  ui.settingsActionTitle.textContent = selectedAction.label;
+  ui.settingsActionDescription.textContent = selectedAction.description;
+  ui.settingsCurrentBinding.textContent = selectedAction.currentSourceLabel;
+  ui.settingsReset.disabled = selectedAction.currentSource === selectedAction.defaultSource;
+
+  ui.settingsSourceList.replaceChildren(
+    ...view.sources.map((source) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.inputSource = source.id;
+      button.disabled = source.isCurrent;
+      button.className = source.id === view.selectedSource ? 'active' : '';
+      const label = document.createElement('strong');
+      label.textContent = source.label;
+      const detail = document.createElement('span');
+      detail.textContent = source.isCurrent
+        ? 'Current input'
+        : source.requiresCamera
+          ? 'Uses visual input'
+          : 'No camera required';
+      button.append(label, detail);
+      return button;
+    }),
+  );
+
+  const preview = view.preview;
+  ui.settingsComparison.replaceChildren();
+  ui.settingsComparison.hidden = true;
+  ui.settingsCalibrationLink.hidden = true;
+  ui.settingsConfirm.disabled = true;
+  ui.settingsConfirm.textContent = 'Use alternative input';
+
+  if (!preview) {
+    ui.settingsRecommendation.textContent =
+      'Choose another input to compare it with the current control.';
+  } else if (preview.recommendation.verdict === 'needs-calibration') {
+    const missingLabels = preview.recommendation.missing.map((source) =>
+      view.sources.find((candidate) => candidate.id === source)?.label ?? source,
+    );
+    ui.settingsRecommendation.textContent =
+      `Test ${missingLabels.join(' and ')} before deciding whether to change this control.`;
+    ui.settingsCalibrationLink.hidden = false;
+  } else {
+    const conflict = preview.conflicts.length > 0
+      ? ` It will replace ${preview.conflicts.map((item) => item.label).join(', ')} in this context.`
+      : '';
+    ui.settingsRecommendation.textContent =
+      `${recommendationLabel(preview.recommendation.verdict)}: ${preview.recommendation.explanation}${conflict}`;
+    renderComparison(ui.settingsComparison, preview);
+    ui.settingsComparison.hidden = false;
+    ui.settingsConfirm.disabled = false;
+    ui.settingsConfirm.textContent = preview.conflicts.length > 0
+      ? `Replace and use ${preview.toLabel}`
+      : `Use ${preview.toLabel}`;
+  }
+
+  const changedActions = view.actions.filter(
+    (action) => action.currentSource !== action.defaultSource,
+  );
+  ui.inputSummary.textContent = changedActions.length === 0
+    ? 'Touch defaults'
+    : changedActions.length === 1
+      ? `${changedActions[0].label}: ${changedActions[0].currentSourceLabel}`
+      : `${changedActions.length} custom bindings`;
+}
+
+function renderComparison(
+  container: HTMLElement,
+  preview: NonNullable<SwarmfallBindingSettingsView['preview']>,
+): void {
+  if (preview.recommendation.verdict === 'needs-calibration') return;
+  const { current, alternative, comparison } = preview.recommendation.evidence;
+  const table = document.createElement('table');
+  const header = document.createElement('tr');
+  header.append(
+    tableCell('th', 'Measurement'),
+    tableCell('th', preview.fromLabel),
+    tableCell('th', preview.toLabel),
+  );
+  table.append(header);
+  appendMetricRow(table, 'Actions detected', formatSuccess(current), formatSuccess(alternative), comparison.success);
+  appendMetricRow(table, 'Typical response', formatLatency(current), formatLatency(alternative), comparison.latency);
+  appendMetricRow(
+    table,
+    'Accidental activations',
+    formatFalseActivations(current),
+    formatFalseActivations(alternative),
+    comparison.falseActivations,
+  );
+  container.append(table);
+}
+
+function appendMetricRow(
+  table: HTMLTableElement,
+  label: string,
+  current: string,
+  alternative: string,
+  comparison: MetricComparison,
+): void {
+  const row = document.createElement('tr');
+  const currentCell = tableCell('td', current);
+  const alternativeCell = tableCell('td', alternative);
+  if (comparison === 'current-better') {
+    currentCell.className = 'better';
+    alternativeCell.className = 'worse';
+  } else if (comparison === 'alternative-better') {
+    currentCell.className = 'worse';
+    alternativeCell.className = 'better';
+  } else {
+    currentCell.className = 'similar';
+    alternativeCell.className = 'similar';
+  }
+  row.append(tableCell('th', label), currentCell, alternativeCell);
+  table.append(row);
+}
+
+function tableCell<T extends 'th' | 'td'>(tag: T, text: string): HTMLElementTagNameMap[T] {
+  const cell = document.createElement(tag);
+  cell.textContent = text;
+  return cell;
+}
+
+function formatSuccess(score: ChannelScore): string {
+  return `${score.successCount}/${score.trialCount} (${Math.round(score.successRate * 100)}%)`;
+}
+
+function formatLatency(score: ChannelScore): string {
+  return score.medianLatencyMs === null ? 'No response' : `${Math.round(score.medianLatencyMs)} ms`;
+}
+
+function formatFalseActivations(score: ChannelScore): string {
+  return `${score.falseActivationCount} (${score.falseActivationsPerMinute.toFixed(1)}/min)`;
+}
+
+function recommendationLabel(verdict: string): string {
+  if (verdict === 'swap') return 'Alternative performed better';
+  if (verdict === 'keep') return 'Original input performed better';
+  if (verdict === 'trade-off') return 'Each input has a trade-off';
+  return 'Retest recommended';
 }
 
 const root = document.querySelector<HTMLDivElement>('#app');
@@ -1052,36 +1246,33 @@ const showAttempt = (feedback: AdaptiveAttemptFeedback): void => {
   const confidence = feedback.confidence === undefined
     ? ''
     : ` (${Math.round(feedback.confidence * 100)}% confidence)`;
-  ui.adaptiveAttempt.textContent = `${feedback.sourceLabel}${confidence}: ${feedback.accepted ? 'accepted' : `rejected — currently using ${feedback.bindingLabel}`}.`;
-  ui.adaptiveAttempt.classList.toggle('accepted', feedback.accepted);
-  ui.adaptiveAttempt.classList.toggle('rejected', !feedback.accepted);
+  ui.inputActivity.textContent = feedback.accepted
+    ? `${feedback.sourceLabel}${confidence} used for Switch squad`
+    : `${feedback.sourceLabel} did not run Switch squad; it currently uses ${feedback.bindingLabel}`;
 };
 const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
   onAttempt: showAttempt,
-  onBindingChanged: (source, label) => {
-    ui.adaptiveBinding.textContent = label;
-    ui.bindingButtons.forEach((button) => {
-      button.classList.toggle('active', button.dataset.inputSource === source);
-    });
+  onNotice: (message, isError) => {
+    ui.inputActivity.textContent = message;
+    ui.inputActivity.classList.toggle('warning', isError);
   },
-  onBindingUnavailable: (message) => {
-    ui.adaptiveAttempt.textContent = message;
-    ui.adaptiveAttempt.classList.remove('accepted');
-    ui.adaptiveAttempt.classList.add('rejected');
+  onSettingsChanged: (view) => renderBindingSettings(view, ui),
+  onSettingsVisibilityChanged: (open) => {
+    ui.settingsLayer.toggleAttribute('hidden', !open);
   },
   onVisionStatus: (status, detail) => {
     const labels: Record<typeof status, string> = {
       IDLE: 'Off',
       REQUESTING: 'Permission requested',
       LOADING: 'Loading',
-      READY: 'Ready',
+      READY: 'Active',
       DENIED: 'Permission denied',
       UNAVAILABLE: 'Unavailable',
       ERROR: 'Error',
     };
     ui.visionStatus.textContent = labels[status];
     ui.visionDetail.textContent = detail ?? '';
-    ui.cameraVideo.classList.toggle('ready', status === 'READY');
+    ui.inputIndicator.classList.toggle('active', status === 'READY');
   },
 });
 wireUiInput(root, bus, adaptive);
