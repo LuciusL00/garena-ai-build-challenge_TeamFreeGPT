@@ -321,7 +321,6 @@ class SwarmfallGame {
   private readonly canvas: HTMLCanvasElement;
   private readonly bus: GameActionBus;
   private selectedSquad: Squad = 'GUARDS';
-  private pendingStrategy: StrategyId = 'MINER_PROTECT';
   private activeStrategy: StrategyId = 'MINER_PROTECT';
   private drawingPath: Point[] | null = null;
   private lastFrame = 0;
@@ -414,12 +413,7 @@ class SwarmfallGame {
       this.drawingPath = null;
     });
     this.bus.on('SELECT_STRATEGY', ({ strategyId }) => {
-      this.pendingStrategy = strategyId;
-      this.showToast(`${getStrategy(strategyId).label} ready to activate`);
-      this.updateUi(true);
-    });
-    this.bus.on('ACTIVATE_STRATEGY', () => {
-      this.activeStrategy = this.pendingStrategy;
+      this.activeStrategy = strategyId;
       this.showToast(`Strategy active: ${getStrategy(this.activeStrategy).label}`);
       this.updateUi(true);
     });
@@ -430,7 +424,6 @@ class SwarmfallGame {
   private beginRound(): void {
     this.state = createRoundState(this.state.width, this.state.height);
     this.state.status = 'PLAYING';
-    this.activeStrategy = this.pendingStrategy;
     this.drawingPath = null;
     this.showToast(`Strategy active: ${getStrategy(this.activeStrategy).label}`);
     this.updateUi(true);
@@ -438,7 +431,6 @@ class SwarmfallGame {
 
   private resetToIntro(): void {
     this.state = createRoundState(this.state.width, this.state.height);
-    this.activeStrategy = this.pendingStrategy;
     this.drawingPath = null;
     this.updateUi(true);
   }
@@ -707,16 +699,15 @@ class SwarmfallGame {
     if (!force && now - this.lastUiUpdate < 80) return;
     this.lastUiUpdate = now;
     const strategy = getStrategy(this.activeStrategy);
-    const pending = getStrategy(this.pendingStrategy);
     this.ui.score.textContent = Math.floor(this.state.score).toString().padStart(4, '0');
     this.ui.time.textContent = `00:${Math.ceil(this.state.timeRemaining).toString().padStart(2, '0')}`;
     this.ui.time.classList.toggle('danger', this.state.timeRemaining <= 10 && this.state.status === 'PLAYING');
     this.ui.swarmStatus.textContent = this.state.status === 'PLAYING' ? 'AUTONOMY ENGAGED' : this.state.status;
     this.ui.activeStrategy.textContent = strategy.label;
-    this.ui.strategyHint.textContent = `Pending: ${pending.label}`;
+    this.ui.strategyHint.textContent = 'Changes apply immediately';
     this.ui.selectedSquad.textContent = this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters';
     this.ui.strategyButtons.forEach((button) => {
-      button.classList.toggle('active', button.dataset.strategy === this.pendingStrategy);
+      button.classList.toggle('active', button.dataset.strategy === this.activeStrategy);
     });
     this.ui.introOverlay.toggleAttribute('hidden', this.state.status === 'PLAYING');
     this.ui.introPanel.toggleAttribute('hidden', this.state.status !== 'INTRO');
@@ -997,8 +988,7 @@ function createUi(root: HTMLElement): UiRefs {
           <div class="strategy-list">
             ${STRATEGIES.map((strategy) => `<button class="strategy${strategy.id === 'MINER_PROTECT' ? ' active' : ''}" type="button" data-strategy="${strategy.id}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
           </div>
-          <button class="activate" type="button" data-action="activate-strategy">Activate strategy</button>
-          <div class="active-strategy"><span class="label">Active strategy</span><strong id="active-strategy">Miner Protect</strong><span class="microcopy" id="strategy-hint">Pending: Miner Protect</span></div>
+          <div class="active-strategy"><span class="label">Active strategy</span><strong id="active-strategy">Miner Protect</strong><span class="microcopy" id="strategy-hint">Changes apply immediately</span></div>
         </aside>
       </main>
       <footer class="bottom-bar">

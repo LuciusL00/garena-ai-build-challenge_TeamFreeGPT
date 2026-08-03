@@ -10,7 +10,6 @@ export type GameAction =
   | 'LASSO_POINT'
   | 'LASSO_END'
   | 'SELECT_STRATEGY'
-  | 'ACTIVATE_STRATEGY'
   | 'BEGIN_ROUND'
   | 'RESTART_ROUND';
 
@@ -21,7 +20,6 @@ export interface ActionPayloadMap {
   LASSO_POINT: { point: Point };
   LASSO_END: { point: Point };
   SELECT_STRATEGY: { strategyId: StrategyId };
-  ACTIVATE_STRATEGY: Record<string, never>;
   BEGIN_ROUND: Record<string, never>;
   RESTART_ROUND: Record<string, never>;
 }

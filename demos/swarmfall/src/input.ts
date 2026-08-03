@@ -84,7 +84,6 @@ export function wireUiInput(
     }
 
     const action = target.dataset.action;
-    if (action === 'activate-strategy') bus.emit('ACTIVATE_STRATEGY', {});
     if (action === 'begin-round') bus.emit('BEGIN_ROUND', {});
     if (action === 'restart-round') bus.emit('RESTART_ROUND', {});
     if (action === 'switch-squad') adaptive.attemptTouchToggle();
