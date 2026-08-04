@@ -36,9 +36,9 @@ adaptive-input layer is the product.
 | Pushed for review | Scoring and recommendation are implemented on `core/adaptive-input-skeleton`: neutral task scores, persistent calibration profiles and comparison-first recommendations pass executable checks |
 | Pushed for review | `/calibration` compares touch/fist using 6-trial quick or 12-trial full tests and counts accidental activations during WAIT |
 | Pending | Mark exports the canonical Swarmfall source and publishes the real action/payload table |
-| Pending | Vivin's detector is ported behind the middleware `InputChannel` contract |
+| Implemented; verification pending | Vivin's detector is behind `InputChannel`, emitting closed fist, normalized point direction and explicit direction-ended signals |
 | Pending | Add explicit player approval, live rebind and before/after validation using the completed scorer and recommender |
-| Pending | Real-phone HTTPS testing, camera-denial fallback and final integration |
+| Pending | Real-phone HTTPS testing and final integration; camera/model failures now return an unavailable channel while touch remains available |
 
 The local directional host is a temporary test object while Mark is unavailable. It must not be
 treated as Mark's canonical game or merged over his work without review.
@@ -81,6 +81,21 @@ treated as Mark's canonical game or merged over his work without review.
    playable.
 8. Provide run steps and evidence for build, fire-once/release, point output and denial behaviour;
    label anything not tested `UNVERIFIED`.
+
+#### Vision phone test record
+
+Physical-device verification is **UNVERIFIED** until the following is recorded on the deployed
+HTTPS build. Do not infer these values from desktop testing.
+
+| Field | Result |
+|---|---|
+| Phone model | UNVERIFIED |
+| Operating system and version | UNVERIFIED |
+| Browser and version | UNVERIFIED |
+| Lighting conditions | UNVERIFIED |
+| Left produces negative x / right produces positive x | UNVERIFIED |
+| Camera denial leaves touch playable | UNVERIFIED on phone |
+| Repeated start/stop releases camera indicator | UNVERIFIED on phone |
 
 ### Mark — Demo Host
 

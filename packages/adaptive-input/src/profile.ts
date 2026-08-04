@@ -106,8 +106,16 @@ function isChannelScore(value: unknown): value is ChannelScore {
     isFiniteNumber(value.falseActivationCount) &&
     isFiniteNumber(value.falseActivationObservationMs) &&
     isFiniteNumber(value.falseActivationsPerMinute) &&
+    (value.directionMetrics === undefined || isDirectionMetrics(value.directionMetrics)) &&
     isFiniteNumber(value.recordedAt)
   );
+}
+
+function isDirectionMetrics(value: unknown): boolean {
+  return isRecord(value) &&
+    isFiniteNumber(value.meanAngularErrorDeg) &&
+    isFiniteNumber(value.meanJitterDeg) &&
+    isFiniteNumber(value.dropoutCount);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

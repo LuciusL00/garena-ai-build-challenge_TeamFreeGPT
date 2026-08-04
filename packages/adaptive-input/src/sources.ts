@@ -77,7 +77,16 @@ export interface DirectionInputSignal extends InputSignalBase {
   direction: { x: number; y: number };
 }
 
-export type InputSignal = TriggerInputSignal | PointInputSignal | DirectionInputSignal;
+/** Explicitly ends a continuous direction when pointing or tracking stops. */
+export interface DirectionEndInputSignal extends InputSignalBase {
+  kind: 'direction-end';
+}
+
+export type InputSignal =
+  | TriggerInputSignal
+  | PointInputSignal
+  | DirectionInputSignal
+  | DirectionEndInputSignal;
 
 /** Metadata attached after a host adapter translates a signal to an action. */
 export type EmissionMeta = InputSignal;

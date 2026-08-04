@@ -18,6 +18,12 @@ export interface ChannelScore {
   falseActivationCount: number;
   falseActivationObservationMs: number;
   falseActivationsPerMinute: number;
+  /** Direction-only quality evidence; omitted for trigger and point tasks. */
+  directionMetrics?: {
+    meanAngularErrorDeg: number;
+    meanJitterDeg: number;
+    dropoutCount: number;
+  };
   recordedAt: number;
 }
 

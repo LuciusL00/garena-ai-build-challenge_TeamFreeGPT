@@ -15,6 +15,7 @@ export type {
   TriggerInputSignal,
   PointInputSignal,
   DirectionInputSignal,
+  DirectionEndInputSignal,
   EmissionMeta,
   MeasurementPhase,
 } from './sources.ts';
@@ -30,6 +31,15 @@ export {
   ChannelManager,
   ChannelUnavailableError,
 } from './channel.ts';
+
+export { VisionInputChannel } from './vision/visionInputChannel.ts';
+export type {
+  VisionDiagnostic,
+  VisionInputChannelOptions,
+  VisionStatus,
+} from './vision/visionInputChannel.ts';
+export * from './vision/closedFistGate.ts';
+export * from './vision/pointDirection.ts';
 export type {
   ChannelContext,
   ChannelStartFailure,
@@ -39,6 +49,8 @@ export type {
 export * from './calibration/types.ts';
 export * from './calibration/harness.ts';
 export * from './calibration/scoreCalibration.ts';
+export * from './calibration/directionHarness.ts';
+export * from './calibration/scoreDirectionCalibration.ts';
 export * from './profile.ts';
 export * from './recommendation/types.ts';
 export * from './recommendation/recommender.ts';

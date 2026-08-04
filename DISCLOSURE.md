@@ -17,7 +17,7 @@ models, datasets and APIs used in this project.
 | React Server DOM Webpack | 19.2.x | MIT | Vinext server-rendered build runtime |
 | Vite React / RSC plugins | 5.1.x / 0.5.x | MIT | Vinext React and server-component build integration |
 | Cloudflare Vite plugin | 1.50.0 | MIT | Runs the Vinext RSC/SSR environments in the Cloudflare Worker runtime used by Sites |
-| MediaPipe Tasks Vision | 0.10.35 | Apache-2.0 | In-browser closed-fist recognition for the calibration integration test |
+| MediaPipe Tasks Vision | 0.10.35 | Apache-2.0 | In-browser closed-fist recognition and hand-landmark pointing direction |
 
 ## Models
 
@@ -29,9 +29,12 @@ models, datasets and APIs used in this project.
 Pre-trained models are used as published. No custom training was performed, and no model
 weights were modified.
 
-The calibration test downloads the pinned MediaPipe WebAssembly runtime from jsDelivr and the
-published Gesture Recognizer model from Google's MediaPipe model storage. Camera frames remain in
-the browser and are not uploaded to either provider.
+The vision channel downloads the pinned MediaPipe WebAssembly runtime from
+`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm` and the published float16
+Gesture Recognizer model from
+`https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task`.
+Camera frames remain in the browser and are not uploaded to either provider. Point direction is
+calculated locally from the model's hand landmarks; no second model or external service is used.
 
 ## APIs
 
