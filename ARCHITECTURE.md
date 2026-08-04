@@ -15,10 +15,10 @@ The layer has two responsibilities:
 2. **Assigning channels to actions.** It measures per-player channel performance, recommends
    a mapping, explains it, and applies it on approval.
 
-The system separates **input sources** from **game actions**. Nothing in a host game ever reads
-a pointer, a hand landmark or a sensor value directly. Input sources emit abstract actions; the
-game listens for them. A binding map decides which source currently drives which action, and
-that map can be changed at runtime.
+The system separates **input sources** from **game actions**. Nothing in game simulation reads a
+pointer, a hand landmark or a sensor value directly. Channels emit neutral `InputSignal` records;
+a host-owned adapter translates them into the host's declared action and typed payload. A binding
+map decides whether that source currently drives the action, and the map can change at runtime.
 
 That indirection is the entire product. Moving an action from a touch button to a hand gesture
 is a one-line map mutation, not a code change. Because every channel is owned by the layer, it
@@ -37,24 +37,21 @@ The layer never imports from a host. Hosts import the layer.
 
 ## 2. Data flow
 
-```
-TouchControls ─┐
-GestureInput  ─┼─► ActionBus.emit(action, { source, timestamp, ... })
-FaceInput     ─┘
-                        │
-                        ├──────────────► TelemetryRecorder   (PRE-GATE — records every
-                        │                                     emission from every source,
-                        │                                     bound or not)
-                        ▼
-              BindingMap.get(action) === payload.source ?
-                        │
-                 no ────┴──── yes
-                 │             │
-                 ▼             ▼
-        log as rejected   dispatch to listeners
-        (habit data)              │
-                                  ▼
-                     host game handles the action
+```text
+TouchInput ───┐
+GestureInput ─┴─► InputSignal (trigger, point, or direction + metadata)
+                         │
+                         ▼
+              host adapter supplies action + typed payload
+                         │
+                         ├────► TelemetryRecorder (PRE-GATE)
+                         ▼
+              BindingMap.get(action) === signal.source ?
+                         │
+                  no ────┴──── yes
+                  │             │
+                  ▼             ▼
+         log as rejected   dispatch to host listener
 ```
 
 Two invariants that are easy to break:
@@ -79,6 +76,13 @@ interface ActionRequirements {
   spatial: boolean;          // needs precise continuous positioning
   latencyCritical: boolean;  // does not tolerate added input latency
 }
+
+interface ActionDescriptor {
+  id: string;
+  requirements: ActionRequirements;
+  defaultSource: InputSourceId; // original game control
+  remappable: boolean;           // false keeps that original control
+}
 ```
 
 These drive **warnings, not blocks**. An action whose requirements a channel serves poorly is
@@ -100,15 +104,20 @@ a time**, whichever channel currently owns a bound source.
 
 ### Typed payloads
 
-Continuous actions carry a vector; discrete actions carry a confidence score. A single loose
-payload type cannot serve both.
+Continuous and discrete actions need different game payloads. Source metadata remains separate
+from those payloads so the host game does not learn which input implementation produced them.
 
 ```ts
-type Payload<A extends GameAction> =
-  ActionPayloadMap[A] & { source: InputSourceId; timestamp: number };
+emit<A extends GameAction>(
+  action: A,
+  payload: ActionPayloadMap[A],
+  signal: InputSignal,
+): boolean;
 
-emit  <A extends GameAction>(action: A, payload: Payload<A>): void;
-listen<A extends GameAction>(action: A, fn: (p: Payload<A>) => void): void;
+listen<A extends GameAction>(
+  action: A,
+  fn: (payload: ActionPayloadMap[A]) => void,
+): void;
 ```
 
 ---
@@ -153,13 +162,8 @@ needs better than the game does.
 | Component | Role | Runs |
 |---|---|---|
 | MediaPipe Tasks Vision | On-device gesture / face recognition | In-browser, on-device |
-| LLM (constrained schema) | Interprets player constraints; composes tactical presets from an allowlisted primitive grammar | Server-side function, between rounds |
-
-The LLM never enters the real-time loop, never generates gameplay code, and never emits
-free-form output. It fills slots in a fixed schema whose values are validated against an
-allowlist server-side before reaching any game.
-
-**TODO** — prompt configurations, schema definitions, validation rules.
+Natural-language mapping is deferred. If added later, a model may select an allowlisted mapping
+ID only; it will not generate strategies, gameplay code, payloads or timed command sequences.
 
 ---
 

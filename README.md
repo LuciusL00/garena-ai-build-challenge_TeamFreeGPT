@@ -60,9 +60,9 @@ adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
 
 // Declare what each action needs. The layer works out the rest.
 adaptive.registerActions([
-  { id: 'LASSO',  requirements: { spatial: true,  latencyCritical: false } },
-  { id: 'RECALL', requirements: { spatial: false, latencyCritical: false } },
-  { id: 'HOLD',   requirements: { spatial: false, latencyCritical: false } },
+  { id: 'MOVE',   requirements: { task: 'DIRECTION', spatial: true,  latencyCritical: false } },
+  { id: 'RECALL', requirements: { task: 'TRIGGER',   spatial: false, latencyCritical: false } },
+  { id: 'HOLD',   requirements: { task: 'TRIGGER',   spatial: false, latencyCritical: false } },
 ]);
 
 adaptive.on('RECALL', () => swarm.recall());

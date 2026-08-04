@@ -1,144 +1,139 @@
 # Project Status
 
-**1 August 2026 · build until 8 Aug, submit 9 Aug**
+**3 August 2026 · build until 8 Aug, submit 9 Aug**
 
-Spec is in [PLAN.md](PLAN.md). Unconfirmed assumptions and open questions are in
-[CONSIDERATIONS.md](CONSIDERATIONS.md). This is just where we are and who does what.
+The specification is in [PLAN.md](PLAN.md). Swarmfall is the mobile-web demo host; the
+adaptive-input layer is the product.
 
----
+## Current product decision
 
-## Rules
+- **T0 first:** remap one existing discrete game action between its normal touch control and a
+  closed fist, then measure, recommend, ask for approval and validate the new binding.
+- **T1 next:** map touch-pointer and hand-point direction to the same continuous directional game
+  action, with a direction-ended signal so movement cannot get stuck.
+- Do not add strategy generation, macros, button-layout adaptation or native-app packaging to T0.
+- The browser demo is appropriate for now: it can run on a phone over HTTPS and exercise real
+  touch and camera hardware. Native Android/iOS game adapters are future portability work.
 
-- Branch per person, PR **merged same day**
-- `git pull` on `main` before starting each day
-- Never two people in one file
-- Update [DISCLOSURE.md](DISCLOSURE.md) when you add a dependency
-- Don't add scope because something finished early
+## Working rules
 
----
+- Branch per person; review before merging to `main`.
+- Pull `main` before starting new work.
+- Never let two people own the same file.
+- Import the middleware only through its public `src/index.ts` entry point.
+- `packages/adaptive-input/` never imports from `demos/`.
+- Add every dependency, model and API to [DISCLOSURE.md](DISCLOSURE.md).
+- Keep pointer, touch and camera APIs inside input adapters, never simulation logic.
 
-## What we're building
+## Current progress
 
-A **game-agnostic middleware layer** that:
-
-1. **Supplies input channels** — touch + on-device hand gesture, one interface. Games get
-   alternative controls without building a camera pipeline or integrating a model.
-2. **Assigns them per player** — measures how well you use each, recommends a better mapping,
-   explains it, applies it on approval, checks it helped.
-
-Swarmfall is the demo host, not the product.
-
-> **Say "touch and hand gesture"** when describing what we provide. Face, tilt and sound are
-> designed, not delivered.
-
----
-
-## Where we are
-
-| | |
+| Status | Item |
 |---|---|
-| ✅ | Repo structure, submission doc skeletons |
-| ✅ | Swarmfall playable |
-| 🔄 | Git + private GitHub + collaborators |
-| ⬜ | Swarmfall source into repo |
+| Pushed for review | Lucius's portable core skeleton on `core/adaptive-input-skeleton`: typed actions, defaults, binding gate, pre-gate telemetry, channel lifecycle and shared calibration harness |
+| Pushed prototype | Vivin's cleaned source on `vision/calibration-prototype` at `b910147` |
+| Manually checked | Vivin's browser prototype detects a closed fist and reports a live point vector |
+| Local review change | Lucius's fallback Swarmfall now uses continuous directional control: release stops; switching squads transfers the active direction |
+| Pushed for review | Scoring and recommendation are implemented on `core/adaptive-input-skeleton`: neutral task scores, persistent calibration profiles and comparison-first recommendations pass executable checks |
+| Pushed for review | `/calibration` compares touch/fist using 6-trial quick or 12-trial full tests and counts accidental activations during WAIT |
+| Pending | Mark exports the canonical Swarmfall source and publishes the real action/payload table |
+| Pending | Vivin's detector is ported behind the middleware `InputChannel` contract |
+| Pending | Add explicit player approval, live rebind and before/after validation using the completed scorer and recommender |
+| Pending | Real-phone HTTPS testing, camera-denial fallback and final integration |
 
-### Delivery tiers
+The local directional host is a temporary test object while Mark is unavailable. It must not be
+treated as Mark's canonical game or merged over his work without review.
 
-Each tier demos on its own. We stop wherever the schedule lands.
+## Ownership
+
+| Owner | Owns | Must not own |
+|---|---|---|
+| **Lucius — Core & Touch** | Public middleware contract, binding gate, telemetry, web touch adapter, scorer, recommender, final integration and temporary fallback host | Vivin's recognition internals or Mark's canonical game mechanics |
+| **Vivin — Vision** | MediaPipe loading, camera permission, closed-fist stability/fire-once, point-vector output, confidence, clean start/stop and vision calibration integration | Swarmfall actions, binding policy or game behaviour |
+| **Mark — Demo Host** | Canonical Swarmfall mechanics, action/payload table, game-side adapter, responsive mobile-web UI and real-phone gameplay testing | Middleware core, camera recognition or recommendation policy |
+
+## Immediate handoffs
+
+### Lucius — Core & Touch
+
+1. Get the pushed core/calibration feature branch reviewed before merging it into an integration branch.
+2. Ask Mark for the canonical action list before choosing the final T0 command.
+3. Keep the middleware contract game-agnostic: it sends an action and typed payload, never worker
+   instructions.
+4. Port one normal touch control behind `InputChannel` and calibrate it with the same cue task used
+   for fist.
+5. Use the completed scorer and recommender to add explicit Accept/Reject, live rebind and
+   before/after results.
+6. Use the local directional Swarmfall only as the integration host until Mark's code is ready.
+
+### Vivin — Vision
+
+1. Record the exact MediaPipe package version and the source/version of every model and WASM file.
+2. Move camera/MediaPipe code behind `InputChannel`; it must not import or name Swarmfall.
+3. Emit a neutral closed-fist source event after a short stable hold, exactly once per hold, and
+   require the hand to open before it can fire again.
+4. Include a monotonic timestamp and confidence on emitted samples so Lucius can score latency and
+   reliability.
+5. Leave point direction as a neutral normalized `{ x, y }` sample plus confidence, and emit a
+   direction-ended signal when pointing is lost or stopped. This is T1, after fist works end to end.
+6. Add prompted point calibration for T1: show a target direction and let code calculate angular
+   error between the target and detected vector. The user does not judge the angle.
+7. Camera denial, recognition failure and channel stop must release the camera and leave touch
+   playable.
+8. Provide run steps and evidence for build, fire-once/release, point output and denial behaviour;
+   label anything not tested `UNVERIFIED`.
+
+### Mark — Demo Host
+
+1. Export the canonical game source to a separate branch; do not replace `main` before review.
+2. Publish this table for every player command:
+
+   ```text
+   action name · payload shape · discrete or continuous · existing game effect
+   original touch control · fixed or remappable · start/update/end behaviour
+   ```
+
+3. Include at least one existing zero-payload discrete command suitable for the T0 fist mapping.
+4. For directional movement, accept one normalized direction for the selected squad and a clear
+   stop/end command. Mark decides how that squad-level action maps to workers.
+5. Keep original touch controls available; the middleware adds or reassigns input sources and does
+   not invent stronger game behaviour.
+6. Confirm that the responsive browser build works on a real phone over HTTPS.
+
+## Integration boundary
+
+```text
+touch or camera → InputChannel → BindingMap → typed game action → Mark's game adapter → game
+                     ↘ pre-gate telemetry → scorer → recommendation → player approval
+```
+
+In plain language: Vivin reports what the hand did, Lucius decides whether that input is currently
+allowed to trigger an existing action, and Mark's game decides what that action does. None of the
+three parts needs to understand the internals of the other two.
+
+## Delivery ladder
 
 | Tier | Contents | Status |
 |---|---|---|
-| **T0** | Swarmfall on the layer · calibration (touch + gesture) · recommender · live rebind · before/after | **must ship** — not started |
-| **T1** | LLM primitive grammar — natural-language commands built from allowlisted parts | not started |
-| **T2** | Second demo host — proves portability | conditional |
-| **T3** | Extra gestures · face channel · advisory layout text | conditional |
+| **T0** | One discrete live rebind, touch + fist calibration, recommendation, approval, before/after and mobile HTTPS demo | Core, calibration, scoring and recommendation complete; live rebind not yet end to end |
+| **T1** | Point-direction mapping, direction calibration and additional allowlisted mappings | Conditional after T0 |
+| **T2** | Second host proving portability | Conditional |
+| **T3** | Extra gesture, face or tilt channels | Conditional |
 
----
+Natural-language mapping is deferred until T0 is reliable. If added later, it may select an
+allowlisted input-to-action mapping ID; it will not generate strategy or executable logic.
 
-## Timeline
+## Verification required for every handoff
 
-| Date | What | Tier |
-|---|---|---|
-| **1 Aug** | Types merged. Swarmfall wired to `ActionBus` | T0 |
-| 2–3 Aug | Touch + gesture channels. Calibration harness | T0 |
-| 4–5 Aug | Recommender, live rebind, calibration + recommendation screens | T0 |
-| 6 Aug | Before/after screen. T1 if clear | T0 / T1 |
-| **7 Aug** | **Integration day.** Full flow end to end, repeatedly | — |
-| 8 Aug | **Freeze at noon.** Record video, finalise deck, finish README + DISCLOSURE | — |
-| 9 Aug | Submit. No code | — |
-| 13 / 23 Aug | Finalists / final presentations | — |
-
-**7 Aug is not a feature day.** Three people building in parallel will have integration problems.
-
----
-
-## Work split
-
-Channels parallelise. The pipeline does not.
-
-```
-ActionBus → Calibration → Scorer → Recommender → Before/After    ← serial, one owner
-     ↑
-TouchControls · GestureInput · (FaceInput)                       ← parallel, one each
-```
-
-| Role | Owns | Notes |
-|---|---|---|
-| **Core & Integration** | Swarmfall integration, bus + gating, calibration harness, recommender, live rebind | Needs familiarity with the Swarmfall codebase. Largest share, runs all week |
-| **Vision Input & Screens** | `GestureInput` (MediaPipe), calibration + recommendation screens | Highest-risk single component — T0 fails without it |
-| **Touch Input & Quality** | `TouchTelemetry`, `InputScorer`, results screen, tuning, device testing, demo script | Swarmfall's buttons already exist — this role instruments them, doesn't build them |
-
-Everything is concurrent **after one merge** — the types with empty bodies. That is the only
-blocking dependency in the project.
-
-Deck content goes to whoever knows the thesis best; technical slides reviewed by Core. No single
-role absorbs all three deliverables.
-
----
-
-## First tasks
-
-**Core & Integration** — Merge `GameAction`, `InputSourceId`, `ActionBus`, `BindingMap`,
-`InputChannel` and the `InputScorer` output type, all with empty bodies. Push immediately; it
-unblocks the other two roles. Then route Swarmfall's existing `LASSO` and `SWITCH_TYPE` through
-the bus.
-
-**Vision Input** — Read [ARCHITECTURE.md](ARCHITECTURE.md) §2–3. Then `GestureInput`: camera
-permission, MediaPipe closed fist, confidence threshold, ~200 ms stability window, fire once,
-handle denial.
-
-**Touch Input** — `TouchTelemetry`: for each press on Swarmfall's existing buttons, record
-landing position, duration, distance from centre, drift and repeat taps. The buttons already
-exist; this instruments them.
-
----
-
-## Decisions
-
-Reasoning in [PLAN.md](PLAN.md) §2.
-
-| Decision | Why |
-|---|---|
-| Inputs emit **abstract actions**; the game never sees taps or gestures | Makes remapping a one-line change instead of a rewrite |
-| The **binding map gates dispatch**, not just config | Otherwise button and gesture both fire after a rebind |
-| Measurement is a **cue-response task**, not in-game taps | A missed tap looks identical to no tap |
-| The recommender **warns, never blocks** | Refusing to let players remap their own controls is paternalistic |
-| The recommender is a **rule set**, not a trained model | It has to explain itself before changing your controls |
-| The LLM **fills slots in a fixed schema** | Creativity from combining allowlisted parts, not from inventing game logic |
-| **One vision model at a time** | Two on one camera stream will hurt frame rate on mid-range phones |
-
----
+- Run `npm run check:adaptive` for middleware work.
+- Run `npm run build` for every repository change.
+- Paste actual output; label anything not tested as `UNVERIFIED`.
+- List every changed file.
+- No secrets, `.env` files, ZIP archives, `node_modules` or generated build folders in commits.
 
 ## Submission checklist
 
-Email `outreachsg@garena.com` with a Google Drive link, folder named after the team.
-**Nothing may be modified after submitting.**
-
-- [ ] **Deck** — PDF, max 15 slides: problem, users, solution, how AI contributes, impact,
-      technical decisions
-- [ ] **Code** — private GitHub repo, add `garena-ai-build-challenge` as collaborator. README,
-      architecture overview, prompt configs, third-party disclosure. **No API keys**
-- [ ] **Video** — max 5 minutes, complete flow end to end
-- [ ] Repo link inside the Drive folder
-
-**Judging:** Problem–Solution Fit 40% · Build Quality 30% · Originality 30%.
+- Deck PDF, maximum 15 slides.
+- Source repository with architecture, setup and disclosure documentation.
+- Video, maximum five minutes, showing the complete flow on a real phone.
+- HTTPS demo URL.
+- Final Google Drive submission on 9 August; no post-submission edits.

@@ -1,5 +1,18 @@
-import type { GameActionBus, Squad } from './actionBus.ts';
+import type { GameActionBus } from './actionBus.ts';
 import type { StrategyId } from './strategy.ts';
+
+export interface AdaptiveUiActions {
+  attemptTouchToggle(): void;
+  openSettings(): void;
+  closeSettings(): void;
+  selectSettingsAction(actionId: string): void;
+  selectSettingsSource(sourceId: string): void;
+  reviewSelectedBinding(): void;
+  startSelectedCalibration(): void;
+  keepCurrentBinding(): void;
+  confirmSelectedBinding(): Promise<void>;
+  resetSelectedBinding(): void;
+}
 
 function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent) {
   const bounds = canvas.getBoundingClientRect();
@@ -47,22 +60,40 @@ export function wireCanvasInput(canvas: HTMLCanvasElement, bus: GameActionBus): 
   };
 }
 
-export function wireUiInput(root: HTMLElement, bus: GameActionBus): () => void {
+export function wireUiInput(
+  root: HTMLElement,
+  bus: GameActionBus,
+  adaptive: AdaptiveUiActions,
+): () => void {
   const onClick = (event: Event) => {
     const eventTarget = event.target;
     if (!(eventTarget instanceof HTMLElement)) return;
-    const target = eventTarget.closest<HTMLElement>('[data-squad], [data-strategy], [data-action]');
+    const target = eventTarget.closest<HTMLElement>(
+      '[data-strategy], [data-action], [data-binding-action], [data-input-source]',
+    );
     if (!target) return;
-
-    const squad = target.dataset.squad as Squad | undefined;
-    if (squad) bus.emit('SELECT_SQUAD', { squad });
 
     const strategyId = target.dataset.strategy as StrategyId | undefined;
     if (strategyId) bus.emit('SELECT_STRATEGY', { strategyId });
 
-    if (target.dataset.action === 'activate-strategy') bus.emit('ACTIVATE_STRATEGY', {});
-    if (target.dataset.action === 'begin-round') bus.emit('BEGIN_ROUND', {});
-    if (target.dataset.action === 'restart-round') bus.emit('RESTART_ROUND', {});
+    if (target.dataset.bindingAction) {
+      adaptive.selectSettingsAction(target.dataset.bindingAction);
+    }
+    if (target.dataset.inputSource) {
+      adaptive.selectSettingsSource(target.dataset.inputSource);
+    }
+
+    const action = target.dataset.action;
+    if (action === 'begin-round') bus.emit('BEGIN_ROUND', {});
+    if (action === 'restart-round') bus.emit('RESTART_ROUND', {});
+    if (action === 'switch-squad') adaptive.attemptTouchToggle();
+    if (action === 'open-adaptive-settings') adaptive.openSettings();
+    if (action === 'close-adaptive-settings') adaptive.closeSettings();
+    if (action === 'review-adaptive-binding') adaptive.reviewSelectedBinding();
+    if (action === 'start-adaptive-calibration') adaptive.startSelectedCalibration();
+    if (action === 'keep-current-binding') adaptive.keepCurrentBinding();
+    if (action === 'confirm-adaptive-binding') void adaptive.confirmSelectedBinding();
+    if (action === 'reset-adaptive-binding') adaptive.resetSelectedBinding();
   };
 
   root.addEventListener('click', onClick);
