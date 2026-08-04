@@ -1,17 +1,27 @@
-import { VisionController, type VisionStatus } from '../../../app/calibration/vision-controller.ts';
 import {
   AdaptiveInput,
   BindingSettingsController,
   CalibrationProfileStore,
   InputSourceId,
+  VisionInputChannel,
   type BindingActionView,
   type BindingChangePreview,
   type BindingSourceView,
+  type InputSignal,
   type InputSourceDefinition,
   type TriggerInputSignal,
 } from '../../../packages/adaptive-input/src/index.ts';
 import { SWARMFALL_ACTION_CATALOG } from './actionCatalog.ts';
 import type { ActionPayloadMap, GameAction, GameActionBus } from './actionBus.ts';
+
+export type VisionStatus =
+  | 'IDLE'
+  | 'REQUESTING'
+  | 'LOADING'
+  | 'READY'
+  | 'DENIED'
+  | 'UNAVAILABLE'
+  | 'ERROR';
 
 const AVAILABLE_INPUTS = [
   {
@@ -68,7 +78,7 @@ export class SwarmfallAdaptiveInput {
   private readonly adaptive = new AdaptiveInput<ActionPayloadMap>();
   private readonly settings: BindingSettingsController<ActionPayloadMap>;
   private readonly profileStore = new CalibrationProfileStore(window.localStorage);
-  private readonly vision: VisionController;
+  private readonly vision: VisionInputChannel;
   private visionStatus: VisionStatus = 'IDLE';
   private selectedAction: GameAction = SWARMFALL_ACTION_CATALOG[0].id;
   private selectedSource: InputSourceId | null = null;
@@ -89,25 +99,17 @@ export class SwarmfallAdaptiveInput {
     this.adaptive.on('TOGGLE_SQUAD', (payload) => gameBus.emit('TOGGLE_SQUAD', payload));
     this.adaptive.bindings.onChange(() => this.refreshSettings());
 
-    this.vision = new VisionController(video, {
+    this.vision = new VisionInputChannel(video, {
       onStatus: (status, detail) => {
         this.visionStatus = status;
         this.callbacks.onVisionStatus(status, detail);
-        if (
-          status === 'DENIED' ||
-          status === 'UNAVAILABLE' ||
-          status === 'ERROR'
-        ) {
+        if (status === 'ERROR') {
           const restored = this.restoreTouchForVisionBindings();
           if (restored) {
             this.callbacks.onNotice('Visual input stopped. Touch control was restored.', true);
           }
         }
       },
-      onFistActivation: (timestamp, confidence) => {
-        this.emitTrigger(InputSourceId.HAND_CLOSED_FIST, timestamp, confidence);
-      },
-      onFistState: () => undefined,
     });
 
     this.refreshSettings();
@@ -195,7 +197,11 @@ export class SwarmfallAdaptiveInput {
     }
 
     if (preview.requiresCamera && !this.isVisionReady()) {
-      await this.vision.start();
+      try {
+        await this.vision.start({ emit: (signal) => this.handleVisionSignal(signal) });
+      } catch {
+        return;
+      }
       if (!this.isVisionReady()) return;
     }
 
@@ -278,5 +284,10 @@ export class SwarmfallAdaptiveInput {
       bindingLabel: sourceLabel(binding),
       ...(confidence === undefined ? {} : { confidence }),
     });
+  }
+
+  private handleVisionSignal(signal: InputSignal): void {
+    if (signal.kind !== 'trigger' || signal.source !== InputSourceId.HAND_CLOSED_FIST) return;
+    this.emitTrigger(signal.source, signal.timestamp, signal.confidence);
   }
 }
