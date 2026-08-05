@@ -195,17 +195,37 @@ export class SwarmfallAdaptiveInput {
 
   async confirmSelectedBinding(): Promise<void> {
     const preview = this.currentPreview();
-    if (!preview) return;
-    if (preview.requiresCamera && this.visionStatus !== 'READY') {
-      try { await this.startVision(false); } catch { return; }
+    if (!preview) {
+      this.callbacks.onNotice('Choose an alternative input before applying a binding.', true);
+      return;
     }
-    this.stopActiveDirectionBeforeBindingChange(preview.action, preview.to);
-    if (preview.readyToApply) this.settings.confirm(preview, true);
-    else this.settings.confirmWithoutCalibration(preview, true);
-    this.saveBindings();
+    if (preview.requiresCamera && this.visionStatus !== 'READY') {
+      this.callbacks.onNotice(`Starting ${preview.toLabel}…`, false);
+      try {
+        await this.startVision(false);
+      } catch {
+        this.refreshSettings();
+        this.callbacks.onNotice(`${preview.toLabel} could not start. The original touch control was kept.`, true);
+        return;
+      }
+    }
+    try {
+      this.stopActiveDirectionBeforeBindingChange(preview.action, preview.to);
+      if (preview.readyToApply) this.settings.confirm(preview, true);
+      else this.settings.confirmWithoutCalibration(preview, true);
+      this.saveBindings();
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : 'The binding could not be changed.';
+      this.refreshSettings();
+      this.callbacks.onNotice(detail, true);
+      return;
+    }
     if (!preview.readyToApply) this.callbacks.onNotice(`${preview.toLabel} enabled without testing. No recommendation was recorded.`, false);
     else this.callbacks.onNotice(`${preview.toLabel} now controls ${preview.actionLabel}.`, false);
-    this.selectedSource = null; this.stage = 'CHOOSE'; this.refreshSettings();
+    this.selectedSource = null;
+    this.stage = 'CHOOSE';
+    this.refreshSettings();
+    this.closeSettings();
   }
 
   resetSelectedBinding(): void {

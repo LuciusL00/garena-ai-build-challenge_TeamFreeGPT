@@ -68,6 +68,11 @@ interface Effect {
   radius: number;
 }
 
+interface DepositSpawnArea {
+  center: Point;
+  radius: number;
+}
+
 interface GameState {
   width: number;
   height: number;
@@ -236,19 +241,30 @@ function createRoundState(width: number, height: number): GameState {
     });
   }
 
+  const harvesterCenter = squadCenters.get('HARVESTERS');
   for (let index = 0; index < BALANCE.initialDepositCount; index += 1) {
-    spawnDeposit(state);
+    spawnDeposit(state, index === 0 && harvesterCenter
+      ? { center: harvesterCenter, radius: activityRadius('SPREAD') }
+      : undefined);
   }
   return state;
 }
 
-function spawnDeposit(state: GameState): void {
+function spawnDeposit(state: GameState, area?: DepositSpawnArea): void {
   if (state.deposits.length >= BALANCE.depositMaxCount) return;
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const position = {
-      x: randomBetween(48, state.width - 48),
-      y: randomBetween(52, state.height - 48),
-    };
+    const angle = Math.random() * TAU;
+    const areaRadius = area ? Math.max(0, area.radius - BALANCE.depositMaxRadius) : 0;
+    const radialDistance = Math.sqrt(Math.random()) * areaRadius;
+    const position = area
+      ? {
+          x: clamp(area.center.x + Math.cos(angle) * radialDistance, 48, state.width - 48),
+          y: clamp(area.center.y + Math.sin(angle) * radialDistance, 52, state.height - 48),
+        }
+      : {
+          x: randomBetween(48, state.width - 48),
+          y: randomBetween(52, state.height - 48),
+        };
     if (distance(position, state.core) < 90) continue;
     if (state.deposits.some((deposit) => distance(position, deposit.position) < 56)) continue;
     const radius = randomBetween(BALANCE.depositMinRadius, BALANCE.depositMaxRadius);
@@ -306,6 +322,30 @@ function findDeposit(state: GameState, id: number | undefined): Deposit | undefi
 
 function findUnit(state: GameState, id: number | undefined): Unit | undefined {
   return state.units.find((unit) => unit.id === id);
+}
+
+function nearestGuardEscortAssignments(guards: readonly Unit[], miners: readonly Unit[]): Map<number, number> {
+  const assignments = new Map<number, number>();
+  const availableGuards = [...guards];
+  const availableMiners = [...miners];
+  while (availableGuards.length > 0 && availableMiners.length > 0) {
+    let nearestGuardIndex = 0;
+    let nearestMinerIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    availableGuards.forEach((guard, guardIndex) => {
+      availableMiners.forEach((miner, minerIndex) => {
+        const candidateDistance = distance(guard.position, miner.position);
+        if (candidateDistance >= nearestDistance) return;
+        nearestDistance = candidateDistance;
+        nearestGuardIndex = guardIndex;
+        nearestMinerIndex = minerIndex;
+      });
+    });
+    const [guard] = availableGuards.splice(nearestGuardIndex, 1);
+    const [miner] = availableMiners.splice(nearestMinerIndex, 1);
+    if (guard && miner) assignments.set(guard.id, miner.id);
+  }
+  return assignments;
 }
 
 class SwarmfallGame {
@@ -503,6 +543,12 @@ class SwarmfallGame {
     const loadedMiners = this.state.units.filter(
       (unit) => unit.kind === 'HARVESTER' && (unit.returning || unit.cargo >= BALANCE.harvesterCargoCapacity),
     );
+    const guardEscortAssignments = guardPolicy === 'ESCORT_LOADED_MINER'
+      ? nearestGuardEscortAssignments(
+          this.state.units.filter((unit) => unit.kind === 'GUARD'),
+          loadedMiners.filter((miner) => distance(miner.position, guardCenter) <= guardActivityRadius),
+        )
+      : new Map<number, number>();
 
     for (const unit of this.state.units) {
       unit.targetId = undefined;
@@ -510,14 +556,10 @@ class SwarmfallGame {
       unit.escortSlot = undefined;
       if (unit.kind === 'GUARD') {
         if (guardPolicy === 'ESCORT_LOADED_MINER') {
-          const escortTarget = loadedMiners
-            .filter((miner) => distance(miner.position, guardCenter) <= guardActivityRadius)
-            .filter((miner) => !escortCounts.has(miner.id))
-            .sort((left, right) => distance(unit.position, left.position) - distance(unit.position, right.position))[0];
+          const escortTarget = findUnit(this.state, guardEscortAssignments.get(unit.id));
           if (escortTarget) {
             unit.escortTargetUnitId = escortTarget.id;
             unit.escortSlot = 0;
-            escortCounts.set(escortTarget.id, 1);
             continue;
           }
         }
@@ -539,6 +581,7 @@ class SwarmfallGame {
       } else if (!unit.returning && unit.cargo < BALANCE.harvesterCargoCapacity) {
         if (harvesterPolicy === 'PROTECT_LOADED_MINER') {
           const escortTarget = loadedMiners
+            .filter((miner) => distance(miner.position, harvesterCenter) <= harvesterActivityRadius)
             .map((miner) => ({ miner, count: escortCounts.get(miner.id) ?? 0 }))
             .filter(({ count }) => count < BALANCE.minerEscortCount)
             .sort((left, right) => distance(unit.position, left.miner.position) - distance(unit.position, right.miner.position))[0]?.miner;
@@ -550,14 +593,9 @@ class SwarmfallGame {
             continue;
           }
         }
-        const nearbyDeposits = this.state.deposits.filter(
+        const candidates = this.state.deposits.filter(
           (deposit) => distance(deposit.position, harvesterCenter) <= harvesterActivityRadius,
         );
-        const candidates = nearbyDeposits.length > 0
-          ? nearbyDeposits
-          : [...this.state.deposits]
-              .sort((left, right) => distance(left.position, harvesterCenter) - distance(right.position, harvesterCenter))
-              .slice(0, 1);
         const target = candidates
           .map((deposit) => {
             const existing = harvesterCounts.get(deposit.id) ?? 0;
@@ -1448,6 +1486,9 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
   onNotice: (message, isError) => {
     ui.inputActivity.textContent = message;
     ui.inputActivity.classList.toggle('warning', isError);
+    if (!ui.settingsLayer.hasAttribute('hidden')) {
+      ui.settingsRecommendation.textContent = message;
+    }
   },
   onSettingsChanged: (view) => renderBindingSettings(view, ui),
   onSettingsVisibilityChanged: (open) => {
