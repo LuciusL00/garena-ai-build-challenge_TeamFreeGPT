@@ -72,7 +72,6 @@ export interface SwarmfallAdaptiveCallbacks {
   onVisionStatus(status: VisionStatus, detail?: string): void;
   onTrainingChanged(active: boolean): void;
   onTrainingDiagnostic(diagnostic: VisionDiagnostic): void;
-  onTrainingSignal(signal: InputSignal): void;
 }
 
 function sourceLabel(source: InputSourceId): string {
@@ -191,7 +190,12 @@ export class SwarmfallAdaptiveInput {
       alternativeSource: preview.to,
     });
   }
-  keepCurrentBinding(): void { this.selectedSource = null; this.stage = 'CHOOSE'; this.refreshSettings(); this.closeSettings(); }
+  keepCurrentBinding(): void {
+    this.selectedSource = null;
+    this.stage = 'CHOOSE';
+    this.refreshSettings();
+    this.callbacks.onNotice('Original input kept. Choose another action or close Controls.', false);
+  }
 
   async confirmSelectedBinding(): Promise<void> {
     const preview = this.currentPreview();
@@ -220,12 +224,13 @@ export class SwarmfallAdaptiveInput {
       this.callbacks.onNotice(detail, true);
       return;
     }
-    if (!preview.readyToApply) this.callbacks.onNotice(`${preview.toLabel} enabled without testing. No recommendation was recorded.`, false);
-    else this.callbacks.onNotice(`${preview.toLabel} now controls ${preview.actionLabel}.`, false);
+    const notice = !preview.readyToApply
+      ? `${preview.toLabel} enabled without testing. No recommendation was recorded.`
+      : `${preview.toLabel} now controls ${preview.actionLabel}.`;
     this.selectedSource = null;
     this.stage = 'CHOOSE';
     this.refreshSettings();
-    this.closeSettings();
+    this.callbacks.onNotice(`${notice} Choose another action or close Controls.`, false);
   }
 
   resetSelectedBinding(): void {
@@ -240,6 +245,7 @@ export class SwarmfallAdaptiveInput {
   }
 
   async startTraining(): Promise<void> {
+    this.vision.focusTriggerSource(null);
     this.training = true;
     this.callbacks.onTrainingChanged(true);
     try { await this.startVision(true); } catch { this.stopTraining(); }
@@ -248,6 +254,7 @@ export class SwarmfallAdaptiveInput {
   stopTraining(): void {
     if (!this.training) return;
     this.training = false;
+    this.vision.focusTriggerSource(null);
     this.callbacks.onTrainingChanged(false);
     if (this.hasVisionBinding()) void this.startVision(false);
     else this.vision.stop();
@@ -256,8 +263,7 @@ export class SwarmfallAdaptiveInput {
   private async startVision(training: boolean): Promise<void> {
     this.training = training;
     await this.vision.start({ emit: (signal) => {
-      if (this.training) this.callbacks.onTrainingSignal(signal);
-      else this.handleVisionSignal(signal);
+      if (!this.training) this.handleVisionSignal(signal);
     } });
   }
 

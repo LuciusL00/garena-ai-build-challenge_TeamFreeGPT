@@ -206,6 +206,7 @@ export default function CalibrationClient() {
   const stopTest = (): void => {
     endTouchDirection();
     activeTestRef.current = null;
+    visionRef.current?.focusTriggerSource(null);
     runTokenRef.current += 1;
     harnessRef.current.abort();
     directionHarnessRef.current.abort();
@@ -248,6 +249,7 @@ export default function CalibrationClient() {
     const token = ++runTokenRef.current;
     harnessRef.current.abort();
     directionHarnessRef.current.abort();
+    visionRef.current?.focusTriggerSource(isVisionSource(sourceId) ? sourceId : null);
     activeTestRef.current = sourceId;
     setActiveTest(sourceId);
     setProgress(`0 / ${config.trialCount}`);
@@ -282,6 +284,7 @@ export default function CalibrationClient() {
     );
 
     if (token !== runTokenRef.current) return;
+    visionRef.current?.focusTriggerSource(null);
     activeTestRef.current = null;
     setActiveTest(null);
     if (session.trials.length !== config.trialCount) {
@@ -305,6 +308,7 @@ export default function CalibrationClient() {
     const token = ++runTokenRef.current;
     harnessRef.current.abort();
     directionHarnessRef.current.abort();
+    visionRef.current?.focusTriggerSource(null);
     activeTestRef.current = sourceId;
     setActiveTest(sourceId);
     setProgress(`0 / ${trialCount}`);

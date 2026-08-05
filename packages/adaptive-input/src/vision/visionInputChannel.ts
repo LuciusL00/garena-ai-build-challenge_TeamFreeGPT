@@ -31,6 +31,8 @@ export interface VisionDiagnostic {
   readonly direction: DirectionVector | null;
   readonly commandState: GestureCommandGateState;
   readonly detectedCommand: InputSourceId | null;
+  /** Trigger command that passed confidence, stability and neutral re-arm gating. */
+  readonly confirmedCommand: InputSourceId | null;
   readonly commandConfidence: number;
   readonly timing: VisionTimingDiagnostic;
 }
@@ -80,6 +82,7 @@ export class VisionInputChannel implements InputChannel {
     'inferenceDurationMs' | 'sampleIntervalMs' | 'effectiveFps'
   > | null = null;
   private previousInferenceStartedAt: number | null = null;
+  private triggerFocus: InputSourceId | null = null;
   private readonly point = new PointDirectionTracker();
   /** One gate for the currently processed hand; future hands can own separate gates. */
   private readonly commandGate: GestureCommandGate;
@@ -100,6 +103,24 @@ export class VisionInputChannel implements InputChannel {
 
   get isActive(): boolean {
     return this.timer !== null && this.stream !== null && this.recognizer !== null;
+  }
+
+  get focusedTriggerSource(): InputSourceId | null {
+    return this.triggerFocus;
+  }
+
+  /**
+   * Restricts one-shot trigger activation to a single neutral input source.
+   * Calibration uses this so another recognized pose cannot lock the per-hand
+   * command gate while a different source is under test. Null restores normal
+   * arbitration across every supported trigger source.
+   */
+  focusTriggerSource(source: InputSourceId | null): void {
+    if (source !== null && !TRIGGER_DEFINITIONS.some((definition) => definition.source === source)) {
+      throw new Error(`${source} is not a trigger source provided by this vision channel.`);
+    }
+    this.triggerFocus = source;
+    this.commandGate.reset();
   }
 
   start(ctx: ChannelContext): Promise<void> {
@@ -234,7 +255,10 @@ export class VisionInputChannel implements InputChannel {
       const gestures = result.gestures[0] ?? [];
       const candidates = triggerCandidates(gestures);
       const detectedCommand = highestConfidenceGestureCommand(candidates);
-      this.commandGate.update(timestamp, detectedCommand);
+      const gatedCommand = this.triggerFocus === null
+        ? detectedCommand
+        : candidates.find((candidate) => candidate.source === this.triggerFocus) ?? null;
+      this.commandGate.update(timestamp, gatedCommand);
 
       let direction: DirectionVector | null = null;
       if (detectedCommand !== null) {
@@ -261,6 +285,7 @@ export class VisionInputChannel implements InputChannel {
         direction,
         commandState,
         detectedCommand: detectedCommand?.source ?? null,
+        confirmedCommand: commandState === 'LOCKED' ? this.commandGate.activeSource : null,
         commandConfidence: detectedCommand?.confidence ?? 0,
         timing: {
           ...startupTiming,
@@ -320,6 +345,7 @@ export class VisionInputChannel implements InputChannel {
     this.recognizer = null;
     this.context = null;
     this.pointing = false;
+    this.triggerFocus = null;
     this.commandGate.reset();
     this.point.reset();
     this.processing = false;

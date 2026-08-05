@@ -503,6 +503,18 @@ async function main(): Promise<void> {
     new VisionInputChannel({} as HTMLVideoElement, { gestureTiming: { stabilityMs: 2_001 } });
   });
 
+  const focusedVision = new VisionInputChannel({} as HTMLVideoElement);
+  focusedVision.focusTriggerSource(InputSourceId.HAND_OPEN_PALM);
+  check(
+    'calibration can focus one game-blind trigger source',
+    focusedVision.focusedTriggerSource === InputSourceId.HAND_OPEN_PALM,
+  );
+  focusedVision.focusTriggerSource(null);
+  check('clearing calibration focus restores normal arbitration', focusedVision.focusedTriggerSource === null);
+  checkThrows('direction input cannot be selected as a trigger focus', () => {
+    focusedVision.focusTriggerSource(InputSourceId.HAND_POINT_DIRECTION);
+  });
+
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);
   }

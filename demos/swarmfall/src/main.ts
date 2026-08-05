@@ -6,7 +6,6 @@ import {
 } from './adaptiveInput.ts';
 import type {
   ChannelScore,
-  InputSignal,
   MetricComparison,
   VisionDiagnostic,
 } from '../../../packages/adaptive-input/src/index.ts';
@@ -1476,6 +1475,7 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
   let selected: Squad = 'GUARDS';
   let mode: FormationMode = 'SPREAD';
   let direction: Point | null = null;
+  let lastConfirmedCommand: InputSourceId | null = null;
   let running = false;
   let last = performance.now();
 
@@ -1506,16 +1506,32 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
   };
 
   return {
-    start() { if (running) return; running = true; last = performance.now(); requestAnimationFrame(frame); },
-    stop() { running = false; context.clearRect(0, 0, canvas.width, canvas.height); },
-    accept(signal: InputSignal) {
-      if (signal.kind === 'direction') direction = signal.direction;
-      if (signal.kind === 'direction-end') direction = null;
-      if (signal.kind !== 'trigger') return;
+    start() {
+      if (running) return;
+      running = true;
+      lastConfirmedCommand = null;
+      last = performance.now();
+      requestAnimationFrame(frame);
+    },
+    stop() {
+      running = false;
       direction = null;
-      if (signal.source === InputSourceId.HAND_CLOSED_FIST) mode = 'GATHERED';
-      if (signal.source === InputSourceId.HAND_OPEN_PALM) mode = 'SPREAD';
-      if (signal.source === InputSourceId.HAND_THUMB_UP) selected = selected === 'GUARDS' ? 'HARVESTERS' : 'GUARDS';
+      lastConfirmedCommand = null;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    },
+    accept(diagnostic: VisionDiagnostic) {
+      direction = diagnostic.direction;
+      const command = diagnostic.confirmedCommand;
+      if (command === null) {
+        lastConfirmedCommand = null;
+        return;
+      }
+      if (command === lastConfirmedCommand) return;
+      lastConfirmedCommand = command;
+      direction = null;
+      if (command === InputSourceId.HAND_CLOSED_FIST) mode = 'GATHERED';
+      if (command === InputSourceId.HAND_OPEN_PALM) mode = 'SPREAD';
+      if (command === InputSourceId.HAND_THUMB_UP) selected = selected === 'GUARDS' ? 'HARVESTERS' : 'GUARDS';
     },
   };
 }
@@ -1592,12 +1608,12 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
     if (active) trainingPreview.start(); else trainingPreview.stop();
   },
   onTrainingDiagnostic: (diagnostic) => {
+    trainingPreview.accept(diagnostic);
     ui.trainingGesture.textContent = trainingDiagnosticLabel(diagnostic);
     ui.trainingConfidence.textContent = diagnostic.direction
       ? `Direction ${diagnostic.direction.x.toFixed(2)}, ${diagnostic.direction.y.toFixed(2)}`
       : `${Math.round(diagnostic.commandConfidence * 100)}% confidence · ${diagnostic.commandState.toLowerCase()}`;
   },
-  onTrainingSignal: (signal) => trainingPreview.accept(signal),
 });
 const pendingSettings = new URLSearchParams(window.location.search);
 if (pendingSettings.get('adaptiveControls') === 'review') {
