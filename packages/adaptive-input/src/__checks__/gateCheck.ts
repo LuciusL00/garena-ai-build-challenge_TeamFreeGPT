@@ -499,6 +499,19 @@ async function main(): Promise<void> {
   fasterGate.update(120, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
   check('120 ms timing fires at its explicit boundary', fasterActivations[0] === 120);
 
+  const confidenceActivations: number[] = [];
+  const confidenceGate = new GestureCommandGate(
+    (_candidate, timestamp) => confidenceActivations.push(timestamp),
+  );
+  confidenceGate.update(0, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.54 });
+  confidenceGate.update(200, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.54 });
+  check('confidence below 55% does not activate', confidenceActivations.length === 0);
+  confidenceGate.update(300, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.55 });
+  confidenceGate.update(499, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.55 });
+  check('55% confidence still requires the full hold time', confidenceActivations.length === 0);
+  confidenceGate.update(500, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.55 });
+  check('55% confidence activates after the configured hold', confidenceActivations[0] === 500);
+
   checkThrows('vision timing options reject values above their bound', () => {
     new VisionInputChannel({} as HTMLVideoElement, { gestureTiming: { stabilityMs: 2_001 } });
   });

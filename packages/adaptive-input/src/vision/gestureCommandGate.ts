@@ -14,8 +14,8 @@ export interface GestureCommandGateConfig {
 }
 
 export const DEFAULT_GESTURE_COMMAND_CONFIG: GestureCommandGateConfig = {
-  enterConfidence: 0.75,
-  exitConfidence: 0.45,
+  enterConfidence: 0.55,
+  exitConfidence: 0.35,
   stabilityMs: 200,
   cooldownMs: 450,
   neutralMs: 150,
