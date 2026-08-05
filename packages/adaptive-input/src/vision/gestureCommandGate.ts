@@ -23,11 +23,23 @@ export const DEFAULT_GESTURE_COMMAND_CONFIG: GestureCommandGateConfig = {
 
 export type GestureCommandGateState = 'READY' | 'CANDIDATE' | 'LOCKED';
 
+/** Selects one command pose for one processed hand. Ties keep detector order. */
+export function highestConfidenceGestureCommand(
+  candidates: readonly GestureCommandCandidate[],
+): GestureCommandCandidate | null {
+  return candidates.reduce<GestureCommandCandidate | null>(
+    (highest, candidate) => !highest || candidate.confidence > highest.confidence
+      ? candidate
+      : highest,
+    null,
+  );
+}
+
 /**
- * Gates one independent, game-blind trigger source.
+ * Gates the selected, game-blind command pose for one processed hand.
  *
- * Create one instance per detector. A gate never knows which other gestures
- * exist, so one source's cooldown cannot suppress another source.
+ * A future multi-hand implementation can create one instance per tracked hand;
+ * this class does not impose a global command lock across hands.
  */
 export class GestureCommandGate {
   private stateValue: GestureCommandGateState = 'READY';
@@ -50,6 +62,10 @@ export class GestureCommandGate {
 
   get state(): GestureCommandGateState {
     return this.stateValue;
+  }
+
+  get activeSource(): InputSourceId | null {
+    return this.candidate?.source ?? null;
   }
 
   update(timestamp: number, candidate: GestureCommandCandidate | null): void {

@@ -7,9 +7,12 @@ import {
   CalibrationProfileStore,
   ChannelManager,
   ControlRecommender,
+  DEFAULT_GESTURE_COMMAND_CONFIG,
+  GestureCommandGate,
   InputChannelId,
   InputSourceId,
-  GestureCommandGate,
+  VisionInputChannel,
+  highestConfidenceGestureCommand,
   scoreCalibration,
 } from '../index.ts';
 import type {
@@ -449,36 +452,55 @@ async function main(): Promise<void> {
   settings.reset('TOGGLE_SQUAD');
   check('reset restores the host default', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON);
 
-  console.log('\nIndependent gesture trigger gates');
+  console.log('\nPer-hand gesture command gate');
   const gestureActivations: InputSourceId[] = [];
-  const fistGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
-  const palmGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
-  const thumbGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
-  fistGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  fistGate.update(210, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  fistGate.update(500, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  check('closed fist fires once while held', gestureActivations.length === 1);
-  palmGate.update(220, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
-  palmGate.update(430, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  const commandGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
+  const selected = highestConfidenceGestureCommand([
+    { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.82 },
+    { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.94 },
+    { source: InputSourceId.HAND_THUMB_UP, confidence: 0.79 },
+  ]);
   check(
-    'open palm can fire while the independent fist gate remains locked',
-    gestureActivations[1] === InputSourceId.HAND_OPEN_PALM,
+    'one highest-confidence command is selected for the processed hand',
+    selected?.source === InputSourceId.HAND_OPEN_PALM,
   );
-  thumbGate.update(440, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
-  thumbGate.update(650, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
-  thumbGate.update(900, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
+
+  commandGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  commandGate.update(100, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.95 });
+  commandGate.update(299, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.95 });
+  check('a pose transition restarts the stability window', gestureActivations.length === 0);
+  commandGate.update(300, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.95 });
   check(
-    'thumbs up is independent and fires once while held',
-    gestureActivations[2] === InputSourceId.HAND_THUMB_UP && gestureActivations.length === 3,
+    'only the stable winning pose fires',
+    gestureActivations.length === 1 && gestureActivations[0] === InputSourceId.HAND_OPEN_PALM,
   );
-  fistGate.update(700, null);
-  fistGate.update(860, null);
-  fistGate.update(900, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  fistGate.update(1_110, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  commandGate.update(800, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  check('another command cannot fire before a neutral re-arm', gestureActivations.length === 1);
+  commandGate.update(900, null);
+  commandGate.update(1_049, null);
+  check('neutral re-arm keeps its configured duration', commandGate.state === 'LOCKED');
+  commandGate.update(1_050, null);
+  commandGate.update(1_060, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  commandGate.update(1_260, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
   check(
-    'neutral re-arm permits only that detector to fire again',
-    gestureActivations[3] === InputSourceId.HAND_CLOSED_FIST,
+    'a new command can fire after neutral',
+    gestureActivations.length === 2 && gestureActivations[1] === InputSourceId.HAND_THUMB_UP,
   );
+
+  const fasterActivations: number[] = [];
+  const fasterGate = new GestureCommandGate(
+    (_candidate, timestamp) => fasterActivations.push(timestamp),
+    { ...DEFAULT_GESTURE_COMMAND_CONFIG, stabilityMs: 120 },
+  );
+  fasterGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  fasterGate.update(119, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  check('120 ms timing does not fire early', fasterActivations.length === 0);
+  fasterGate.update(120, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  check('120 ms timing fires at its explicit boundary', fasterActivations[0] === 120);
+
+  checkThrows('vision timing options reject values above their bound', () => {
+    new VisionInputChannel({} as HTMLVideoElement, { gestureTiming: { stabilityMs: 2_001 } });
+  });
 
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);
