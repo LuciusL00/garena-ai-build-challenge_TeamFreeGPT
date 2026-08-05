@@ -1466,14 +1466,29 @@ function formatSavedResultDate(
 function createTrainingPreview(canvas: HTMLCanvasElement) {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Training canvas context is unavailable.');
-  const units = Array.from({ length: 10 }, (_, index) => ({
-    kind: index < 5 ? 'GUARDS' as const : 'HARVESTERS' as const,
-    index: index % 5,
-    x: canvas.width * (index < 5 ? 0.38 : 0.62),
-    y: canvas.height * 0.5,
-  }));
+  const previewAnchor = (
+    squad: Squad,
+    index: number,
+    formation: FormationMode | null,
+  ): Point => {
+    const center = getInitialSquadCenter(squad, canvas.width, canvas.height);
+    const kind: UnitKind = squad === 'GUARDS' ? 'GUARD' : 'HARVESTER';
+    if (formation !== null) return formationAnchor(center, kind, formation, index);
+    const gathered = formationAnchor(center, kind, 'GATHERED', index);
+    const spread = formationAnchor(center, kind, 'SPREAD', index);
+    return {
+      x: (gathered.x + spread.x) / 2,
+      y: (gathered.y + spread.y) / 2,
+    };
+  };
+  const units = Array.from({ length: 10 }, (_, index) => {
+    const kind: Squad = index < 5 ? 'GUARDS' : 'HARVESTERS';
+    const unitIndex = index % 5;
+    const position = previewAnchor(kind, unitIndex, null);
+    return { kind, index: unitIndex, x: position.x, y: position.y };
+  });
   let selected: Squad = 'GUARDS';
-  let mode: FormationMode = 'SPREAD';
+  let mode: FormationMode | null = null;
   let direction: Point | null = null;
   let lastConfirmedCommand: InputSourceId | null = null;
   let running = false;
@@ -1486,11 +1501,9 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
     context.clearRect(0, 0, canvas.width, canvas.height);
     for (const unit of units) {
       if (unit.kind === selected) {
-        const center = getInitialSquadCenter(unit.kind, canvas.width, canvas.height);
-        const kind: UnitKind = unit.kind === 'GUARDS' ? 'GUARD' : 'HARVESTER';
         const anchor = direction
           ? { x: unit.x + direction.x * 110, y: unit.y + direction.y * 110 }
-          : formationAnchor(center, kind, mode, unit.index);
+          : previewAnchor(unit.kind, unit.index, mode);
         const rate = 1 - Math.exp(-5 * delta);
         unit.x += (anchor.x - unit.x) * rate;
         unit.y += (anchor.y - unit.y) * rate;
@@ -1509,7 +1522,15 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
     start() {
       if (running) return;
       running = true;
+      selected = 'GUARDS';
+      mode = null;
+      direction = null;
       lastConfirmedCommand = null;
+      units.forEach((unit) => {
+        const position = previewAnchor(unit.kind, unit.index, null);
+        unit.x = position.x;
+        unit.y = position.y;
+      });
       last = performance.now();
       requestAnimationFrame(frame);
     },
@@ -1536,12 +1557,28 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
   };
 }
 
+function trainingCommandLabel(source: InputSourceId): string {
+  if (source === InputSourceId.HAND_CLOSED_FIST) return 'Closed fist · Gather';
+  if (source === InputSourceId.HAND_OPEN_PALM) return 'Open palm · Spread';
+  if (source === InputSourceId.HAND_THUMB_UP) return 'Thumbs up · Switch';
+  return source;
+}
+
 function trainingDiagnosticLabel(diagnostic: VisionDiagnostic): string {
-  if (diagnostic.detectedCommand === InputSourceId.HAND_CLOSED_FIST) return 'Closed fist · Gather';
-  if (diagnostic.detectedCommand === InputSourceId.HAND_OPEN_PALM) return 'Open palm · Spread';
-  if (diagnostic.detectedCommand === InputSourceId.HAND_THUMB_UP) return 'Thumbs up · Switch';
+  const detected = diagnostic.detectedCommand;
+  const confirmed = diagnostic.confirmedCommand;
+  if (detected !== null && confirmed !== null && detected !== confirmed) {
+    return `${trainingCommandLabel(detected)} detected · release previous gesture first`;
+  }
+  if (detected !== null && detected === confirmed) {
+    return `${trainingCommandLabel(confirmed)} applied`;
+  }
+  if (confirmed !== null) {
+    return `${trainingCommandLabel(confirmed)} applied · release hand to re-arm`;
+  }
+  if (detected !== null) return `${trainingCommandLabel(detected)} · hold`;
   if (diagnostic.direction) return 'Pointing · Direct';
-  return diagnostic.commandState === 'LOCKED' ? 'Return to a neutral pose' : 'Neutral';
+  return 'Neutral';
 }
 
 const root = document.querySelector<HTMLDivElement>('#app');
