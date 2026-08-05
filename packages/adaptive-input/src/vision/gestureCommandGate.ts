@@ -21,7 +21,7 @@ export const DEFAULT_GESTURE_COMMAND_CONFIG: GestureCommandGateConfig = {
   neutralMs: 150,
 };
 
-export type GestureCommandGateState = 'READY' | 'CANDIDATE' | 'LOCKED';
+export type GestureCommandGateState = 'READY' | 'CANDIDATE' | 'LOCKED' | 'TRANSITION';
 
 /** Selects one command pose for one processed hand. Ties keep detector order. */
 export function highestConfidenceGestureCommand(
@@ -45,6 +45,7 @@ export class GestureCommandGate {
   private stateValue: GestureCommandGateState = 'READY';
   private candidate: GestureCommandCandidate | null = null;
   private candidateSince: number | null = null;
+  private lockedSource: InputSourceId | null = null;
   private firedAt: number | null = null;
   private neutralSince: number | null = null;
 
@@ -65,7 +66,9 @@ export class GestureCommandGate {
   }
 
   get activeSource(): InputSourceId | null {
-    return this.candidate?.source ?? null;
+    return this.stateValue === 'LOCKED'
+      ? this.lockedSource
+      : this.candidate?.source ?? null;
   }
 
   update(timestamp: number, candidate: GestureCommandCandidate | null): void {
@@ -73,8 +76,38 @@ export class GestureCommandGate {
       ? candidate
       : null;
 
-    if (this.stateValue === 'LOCKED') {
-      if (candidate && candidate.confidence > this.config.exitConfidence) {
+    if (this.stateValue === 'LOCKED' || this.stateValue === 'TRANSITION') {
+      const clearsExitThreshold = candidate && candidate.confidence > this.config.exitConfidence;
+      if (clearsExitThreshold && candidate.source === this.lockedSource) {
+        this.stateValue = 'LOCKED';
+        this.candidate = null;
+        this.candidateSince = null;
+        this.neutralSince = null;
+        return;
+      }
+
+      if (recognized && recognized.source !== this.lockedSource) {
+        this.neutralSince = null;
+        if (!this.candidate || this.candidate.source !== recognized.source) {
+          this.stateValue = 'TRANSITION';
+          this.candidate = recognized;
+          this.candidateSince = timestamp;
+          return;
+        }
+        this.stateValue = 'TRANSITION';
+        this.candidate = recognized;
+        const cooldownComplete = this.firedAt === null ||
+          timestamp - this.firedAt >= this.config.cooldownMs;
+        const transitionStable = this.candidateSince !== null &&
+          timestamp - this.candidateSince >= this.config.stabilityMs;
+        if (cooldownComplete && transitionStable) this.fire(recognized, timestamp);
+        return;
+      }
+
+      this.stateValue = 'LOCKED';
+      this.candidate = null;
+      this.candidateSince = null;
+      if (clearsExitThreshold) {
         this.neutralSince = null;
         return;
       }
@@ -103,17 +136,25 @@ export class GestureCommandGate {
       this.candidateSince !== null &&
       timestamp - this.candidateSince >= this.config.stabilityMs
     ) {
-      this.stateValue = 'LOCKED';
-      this.firedAt = timestamp;
-      this.neutralSince = null;
-      this.onActivation(recognized, timestamp);
+      this.fire(recognized, timestamp);
     }
+  }
+
+  private fire(candidate: GestureCommandCandidate, timestamp: number): void {
+    this.stateValue = 'LOCKED';
+    this.candidate = null;
+    this.candidateSince = null;
+    this.lockedSource = candidate.source;
+    this.firedAt = timestamp;
+    this.neutralSince = null;
+    this.onActivation(candidate, timestamp);
   }
 
   reset(): void {
     this.stateValue = 'READY';
     this.candidate = null;
     this.candidateSince = null;
+    this.lockedSource = null;
     this.firedAt = null;
     this.neutralSince = null;
   }

@@ -475,17 +475,26 @@ async function main(): Promise<void> {
     'only the stable winning pose fires',
     gestureActivations.length === 1 && gestureActivations[0] === InputSourceId.HAND_OPEN_PALM,
   );
-  commandGate.update(800, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
-  check('another command cannot fire before a neutral re-arm', gestureActivations.length === 1);
-  commandGate.update(900, null);
-  commandGate.update(1_049, null);
+  commandGate.update(500, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  commandGate.update(699, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  check('a different pose does not fire before stability and cooldown', gestureActivations.length === 1);
+  commandGate.update(750, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  check(
+    'a stable different pose fires without pointing or neutral first',
+    gestureActivations.length === 2 && gestureActivations[1] === InputSourceId.HAND_THUMB_UP,
+  );
+  commandGate.update(950, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  check('holding the same pose does not repeat its action', gestureActivations.length === 2);
+  commandGate.update(1_000, null);
+  commandGate.update(1_200, null);
+  commandGate.update(1_349, null);
   check('neutral re-arm keeps its configured duration', commandGate.state === 'LOCKED');
-  commandGate.update(1_050, null);
-  commandGate.update(1_060, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
-  commandGate.update(1_260, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.95 });
+  commandGate.update(1_350, null);
+  commandGate.update(1_360, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.95 });
+  commandGate.update(1_560, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.95 });
   check(
     'a new command can fire after neutral',
-    gestureActivations.length === 2 && gestureActivations[1] === InputSourceId.HAND_THUMB_UP,
+    gestureActivations.length === 3 && gestureActivations[2] === InputSourceId.HAND_CLOSED_FIST,
   );
 
   const fasterActivations: number[] = [];
