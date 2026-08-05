@@ -41,4 +41,7 @@ export const BALANCE = {
   harvesterImpactForce: 70,
   effectSeconds: 0.32,
   gridSize: 32,
+  gatherRadius: 24,
+  spreadRadius: 105,
+  directedDistance: 150,
 } as const;

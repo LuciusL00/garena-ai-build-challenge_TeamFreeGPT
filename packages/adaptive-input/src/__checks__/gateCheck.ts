@@ -9,6 +9,7 @@ import {
   ControlRecommender,
   InputChannelId,
   InputSourceId,
+  GestureCommandGate,
   scoreCalibration,
 } from '../index.ts';
 import type {
@@ -24,8 +25,7 @@ interface TestActions {
   BEGIN_ROUND: EmptyPayload;
   RESTART_ROUND: EmptyPayload;
   TOGGLE_SQUAD: EmptyPayload;
-  LASSO_START: { x: number; y: number };
-  LASSO_END: { x: number; y: number };
+  DIRECT_UNITS: { direction: { x: number; y: number } | null };
 }
 
 const failures: string[] = [];
@@ -115,15 +115,9 @@ async function main(): Promise<void> {
       remappable: true,
     },
     {
-      id: 'LASSO_START',
-      requirements: { task: 'POINT', spatial: true, latencyCritical: false },
-      defaultSource: InputSourceId.TOUCH_POINTER,
-      remappable: false,
-    },
-    {
-      id: 'LASSO_END',
-      requirements: { task: 'POINT', spatial: true, latencyCritical: false },
-      defaultSource: InputSourceId.TOUCH_POINTER,
+      id: 'DIRECT_UNITS',
+      requirements: { task: 'DIRECTION', spatial: false, latencyCritical: true },
+      defaultSource: InputSourceId.TOUCH_DIRECTION,
       remappable: false,
     },
   ]);
@@ -136,9 +130,8 @@ async function main(): Promise<void> {
       adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON,
   );
   check(
-    'one touch-pointer source backs lasso boundaries',
-    adaptive.bindings.get('LASSO_START') === InputSourceId.TOUCH_POINTER &&
-      adaptive.bindings.get('LASSO_END') === InputSourceId.TOUCH_POINTER,
+    'direction action keeps its touch fallback',
+    adaptive.bindings.get('DIRECT_UNITS') === InputSourceId.TOUCH_DIRECTION,
   );
   checkThrows('fixed Begin control cannot be rebound', () => {
     adaptive.rebind('BEGIN_ROUND', InputSourceId.HAND_CLOSED_FIST);
@@ -441,6 +434,8 @@ async function main(): Promise<void> {
   );
   check('binding remains unavailable until both inputs are measured', !unmeasuredPreview.readyToApply);
   check('preview does not mutate the live binding', adaptive.bindings.get('TOGGLE_SQUAD') === bindingBeforePreview);
+  settings.confirm(unmeasuredPreview, true, true);
+  check('explicit skip applies an uncalibrated binding', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.HAND_CLOSED_FIST);
   adaptive.rebind('TOGGLE_SQUAD', InputSourceId.TOUCH_BUTTON);
   const measuredPreview = settings.preview(
     'TOGGLE_SQUAD',
@@ -453,6 +448,19 @@ async function main(): Promise<void> {
   check('confirmation applies the alternative input', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.HAND_CLOSED_FIST);
   settings.reset('TOGGLE_SQUAD');
   check('reset restores the host default', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON);
+
+  console.log('\nGesture command arbitration');
+  const gestureActivations: InputSourceId[] = [];
+  const gestureGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
+  gestureGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  gestureGate.update(210, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  gestureGate.update(700, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  check('closed fist fires exactly once while another pose follows', gestureActivations.length === 1);
+  gestureGate.update(710, null);
+  gestureGate.update(870, null);
+  gestureGate.update(900, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  gestureGate.update(1_110, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  check('neutral re-arm permits the next deliberate command', gestureActivations[1] === InputSourceId.HAND_OPEN_PALM);
 
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);

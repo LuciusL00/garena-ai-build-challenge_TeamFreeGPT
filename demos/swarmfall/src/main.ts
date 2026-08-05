@@ -6,12 +6,15 @@ import {
 } from './adaptiveInput.ts';
 import type {
   ChannelScore,
+  InputSignal,
   MetricComparison,
+  VisionDiagnostic,
 } from '../../../packages/adaptive-input/src/index.ts';
+import { InputSourceId } from '../../../packages/adaptive-input/src/index.ts';
 import { GameActionBus, type Squad } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import { wireCanvasInput, wireUiInput } from './input.ts';
-import { getArenaLayout, getDefaultLasso, type Point } from './ui/layout.ts';
+import { getArenaLayout, type Point } from './ui/layout.ts';
 import {
   getStrategy,
   STRATEGIES,
@@ -21,9 +24,7 @@ import {
 type RoundStatus = 'INTRO' | 'PLAYING' | 'FINISHED';
 type UnitKind = 'GUARD' | 'HARVESTER';
 
-interface Lasso {
-  points: Point[];
-}
+type FormationMode = 'GATHERED' | 'SPREAD';
 
 interface Unit {
   id: number;
@@ -80,7 +81,8 @@ interface GameState {
   units: Unit[];
   asteroids: Asteroid[];
   deposits: Deposit[];
-  lassos: Map<Squad, Lasso>;
+  formations: Map<Squad, FormationMode>;
+  directions: Map<Squad, Point | null>;
   effects: Effect[];
   stars: Point[];
 }
@@ -114,9 +116,16 @@ interface UiRefs {
   settingsKeep: HTMLButtonElement;
   settingsConfirm: HTMLButtonElement;
   settingsReset: HTMLButtonElement;
+  schemeToggle: HTMLButtonElement;
   visionStatus: HTMLElement;
   visionDetail: HTMLElement;
   cameraVideo: HTMLVideoElement;
+  trainingPanel: HTMLElement;
+  trainingCanvas: HTMLCanvasElement;
+  trainingGesture: HTMLElement;
+  trainingConfidence: HTMLElement;
+  trainingStart: HTMLButtonElement;
+  trainingStop: HTMLButtonElement;
   strategyButtons: NodeListOf<HTMLButtonElement>;
 }
 
@@ -144,39 +153,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function pointInPolygon(point: Point, polygon: readonly Point[]): boolean {
-  let inside = false;
-  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
-    const currentPoint = polygon[index];
-    const previousPoint = polygon[previous];
-    const crosses =
-      currentPoint.y > point.y !== previousPoint.y > point.y &&
-      point.x <
-        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
-          (previousPoint.y - currentPoint.y) +
-          currentPoint.x;
-    if (crosses) inside = !inside;
-  }
-  return inside;
-}
-
-function averagePoint(points: readonly Point[]): Point {
-  if (points.length === 0) return { x: 0, y: 0 };
-  const sum = points.reduce((total, point) => ({ x: total.x + point.x, y: total.y + point.y }), {
-    x: 0,
-    y: 0,
-  });
-  return { x: sum.x / points.length, y: sum.y / points.length };
-}
-
-function idleAnchor(lasso: Lasso, index: number): Point {
-  const centre = averagePoint(lasso.points);
-  const point = lasso.points[index % lasso.points.length] ?? centre;
-  const blend = 0.42 + (index % 3) * 0.12;
-  return {
-    x: centre.x * (1 - blend) + point.x * blend,
-    y: centre.y * (1 - blend) + point.y * blend,
-  };
+function formationAnchor(squad: Squad, mode: FormationMode, index: number, width: number, height: number): Point {
+  const centre = squad === 'GUARDS' ? { x: width * 0.38, y: height * 0.42 } : { x: width * 0.62, y: height * 0.62 };
+  const radius = mode === 'GATHERED' ? BALANCE.gatherRadius : BALANCE.spreadRadius;
+  const angle = (index / 5) * TAU;
+  return { x: centre.x + Math.cos(angle) * radius, y: centre.y + Math.sin(angle) * radius };
 }
 
 function makeStars(width: number, height: number): Point[] {
@@ -188,10 +169,7 @@ function makeStars(width: number, height: number): Point[] {
 
 function createRoundState(width: number, height: number): GameState {
   const layout = getArenaLayout(width, height);
-  const lassos = new Map<Squad, Lasso>([
-    ['GUARDS', { points: getDefaultLasso('GUARDS', width, height) }],
-    ['HARVESTERS', { points: getDefaultLasso('HARVESTERS', width, height) }],
-  ]);
+  const formations = new Map<Squad, FormationMode>([['GUARDS', 'SPREAD'], ['HARVESTERS', 'SPREAD']]);
   const state: GameState = {
     width,
     height,
@@ -205,14 +183,14 @@ function createRoundState(width: number, height: number): GameState {
     units: [],
     asteroids: [],
     deposits: [],
-    lassos,
+    formations,
+    directions: new Map<Squad, Point | null>([['GUARDS', null], ['HARVESTERS', null]]),
     effects: [],
     stars: makeStars(width, height),
   };
 
   for (let index = 0; index < BALANCE.guardCount; index += 1) {
-    const lasso = lassos.get('GUARDS');
-    const anchor = lasso ? idleAnchor(lasso, index) : layout.core;
+    const anchor = formationAnchor('GUARDS', 'SPREAD', index, width, height);
     state.units.push({
       id: state.nextId++,
       kind: 'GUARD',
@@ -227,8 +205,7 @@ function createRoundState(width: number, height: number): GameState {
   }
 
   for (let index = 0; index < BALANCE.harvesterCount; index += 1) {
-    const lasso = lassos.get('HARVESTERS');
-    const anchor = lasso ? idleAnchor(lasso, index) : layout.core;
+    const anchor = formationAnchor('HARVESTERS', 'SPREAD', index, width, height);
     state.units.push({
       id: state.nextId++,
       kind: 'HARVESTER',
@@ -321,8 +298,7 @@ class SwarmfallGame {
   private readonly canvas: HTMLCanvasElement;
   private readonly bus: GameActionBus;
   private selectedSquad: Squad = 'GUARDS';
-  private activeStrategy: StrategyId = 'MINER_PROTECT';
-  private drawingPath: Point[] | null = null;
+  private activeStrategy: StrategyId | null = 'MINER_PROTECT';
   private lastFrame = 0;
   private lastUiUpdate = 0;
   private toastUntil = 0;
@@ -368,10 +344,6 @@ class SwarmfallGame {
         deposit.position = scalePoint(deposit.position, xScale, yScale);
       });
       this.state.stars = this.state.stars.map((star) => scalePoint(star, xScale, yScale));
-      this.state.lassos.forEach((lasso) => {
-        lasso.points = lasso.points.map((point) => scalePoint(point, xScale, yScale));
-      });
-      if (this.drawingPath) this.drawingPath = this.drawingPath.map((point) => scalePoint(point, xScale, yScale));
     }
     this.state.width = width;
     this.state.height = height;
@@ -390,31 +362,32 @@ class SwarmfallGame {
     });
     this.bus.on('TOGGLE_SQUAD', () => {
       this.selectedSquad = this.selectedSquad === 'GUARDS' ? 'HARVESTERS' : 'GUARDS';
-      this.drawingPath = null;
       this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} selected`);
       this.updateUi(true);
     });
-    this.bus.on('LASSO_START', ({ point }) => {
-      if (this.state.status !== 'PLAYING') return;
-      this.drawingPath = [point];
+    this.bus.on('GATHER_UNITS', () => {
+      this.state.formations.set(this.selectedSquad, 'GATHERED');
+      this.state.directions.set(this.selectedSquad, null);
+      this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} gathering`);
     });
-    this.bus.on('LASSO_POINT', ({ point }) => {
-      if (!this.drawingPath) return;
-      const previous = this.drawingPath[this.drawingPath.length - 1];
-      if (!previous || distance(previous, point) > 5) this.drawingPath.push(point);
+    this.bus.on('SPREAD_UNITS', () => {
+      this.state.formations.set(this.selectedSquad, 'SPREAD');
+      this.state.directions.set(this.selectedSquad, null);
+      this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} spreading out`);
     });
-    this.bus.on('LASSO_END', ({ point }) => {
-      if (!this.drawingPath) return;
-      this.drawingPath.push(point);
-      if (this.drawingPath.length >= 3) {
-        this.state.lassos.set(this.selectedSquad, { points: [...this.drawingPath] });
-        this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guard' : 'Harvester'} territory updated`);
-      }
-      this.drawingPath = null;
+    this.bus.on('DIRECT_UNITS', ({ direction }) => {
+      this.state.directions.set(this.selectedSquad, direction);
     });
     this.bus.on('SELECT_STRATEGY', ({ strategyId }) => {
-      this.activeStrategy = strategyId;
-      this.showToast(`Strategy active: ${getStrategy(this.activeStrategy).label}`);
+      if (this.activeStrategy === strategyId) {
+        this.activeStrategy = null;
+        this.state.directions.set('GUARDS', null);
+        this.state.directions.set('HARVESTERS', null);
+        this.showToast('Manual gesture control active');
+      } else {
+        this.activeStrategy = strategyId;
+        this.showToast(`Strategy active: ${getStrategy(strategyId).label}`);
+      }
       this.updateUi(true);
     });
     this.bus.on('BEGIN_ROUND', () => this.beginRound());
@@ -424,14 +397,14 @@ class SwarmfallGame {
   private beginRound(): void {
     this.state = createRoundState(this.state.width, this.state.height);
     this.state.status = 'PLAYING';
-    this.drawingPath = null;
-    this.showToast(`Strategy active: ${getStrategy(this.activeStrategy).label}`);
+    this.showToast(this.activeStrategy
+      ? `Strategy active: ${getStrategy(this.activeStrategy).label}`
+      : 'Manual gesture control active');
     this.updateUi(true);
   }
 
   private resetToIntro(): void {
     this.state = createRoundState(this.state.width, this.state.height);
-    this.drawingPath = null;
     this.updateUi(true);
   }
 
@@ -470,12 +443,18 @@ class SwarmfallGame {
   }
 
   private assignTargets(): void {
+    if (this.activeStrategy === null) {
+      this.state.units.forEach((unit) => {
+        unit.targetId = undefined;
+        unit.escortTargetUnitId = undefined;
+        unit.escortSlot = undefined;
+      });
+      return;
+    }
     const strategy = getStrategy(this.activeStrategy);
     const guardCounts = new Map<number, number>();
     const harvesterCounts = new Map<number, number>();
     const escortCounts = new Map<number, number>();
-    const guardLasso = this.state.lassos.get('GUARDS');
-    const harvesterLasso = this.state.lassos.get('HARVESTERS');
     const loadedMiners = this.state.units.filter(
       (unit) => unit.kind === 'HARVESTER' && (unit.returning || unit.cargo >= BALANCE.harvesterCargoCapacity),
     );
@@ -487,7 +466,6 @@ class SwarmfallGame {
       if (unit.kind === 'GUARD') {
         if (strategy.guardPolicy === 'ESCORT_LOADED_MINER') {
           const escortTarget = loadedMiners
-            .filter((miner) => guardLasso && pointInPolygon(miner.position, guardLasso.points))
             .filter((miner) => !escortCounts.has(miner.id))
             .sort((left, right) => distance(unit.position, left.position) - distance(unit.position, right.position))[0];
           if (escortTarget) {
@@ -497,14 +475,12 @@ class SwarmfallGame {
             continue;
           }
         }
-        const candidates = this.state.asteroids.filter(
-          (asteroid) => guardLasso && pointInPolygon(asteroid.position, guardLasso.points),
-        );
+        const candidates = this.state.asteroids;
         const target = candidates
           .map((asteroid) => {
             const existing = guardCounts.get(asteroid.id) ?? 0;
             const unitDistance = distance(unit.position, asteroid.position);
-            const crowdingPenalty = strategy.guardPolicy === 'SPREAD_IN_LASSO' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
+            const crowdingPenalty = strategy.guardPolicy === 'SPREAD_FORMATION' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
             return { asteroid, score: unitDistance + existing * crowdingPenalty };
           })
           .sort((left, right) => left.score - right.score)[0]?.asteroid;
@@ -524,14 +500,12 @@ class SwarmfallGame {
             continue;
           }
         }
-        const candidates = this.state.deposits.filter(
-          (deposit) => harvesterLasso && pointInPolygon(deposit.position, harvesterLasso.points),
-        );
+        const candidates = this.state.deposits;
         const target = candidates
           .map((deposit) => {
             const existing = harvesterCounts.get(deposit.id) ?? 0;
             const unitDistance = distance(unit.position, deposit.position);
-            const crowdingPenalty = strategy.harvesterPolicy === 'SPREAD_IN_LASSO' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
+            const crowdingPenalty = strategy.harvesterPolicy === 'SPREAD_FORMATION' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
             return { deposit, score: unitDistance + existing * crowdingPenalty };
           })
           .sort((left, right) => left.score - right.score)[0]?.deposit;
@@ -571,8 +545,15 @@ class SwarmfallGame {
       if (unit.kind === 'HARVESTER' && unit.cargo >= BALANCE.harvesterCargoCapacity) unit.returning = true;
 
       let destination: Point;
+      const squad: Squad = unit.kind === 'GUARD' ? 'GUARDS' : 'HARVESTERS';
+      const directed = this.state.directions.get(squad);
       const escortTarget = findUnit(this.state, unit.escortTargetUnitId);
-      if (unit.returning) {
+      if (directed) {
+        destination = {
+          x: unit.position.x + directed.x * BALANCE.directedDistance,
+          y: unit.position.y + directed.y * BALANCE.directedDistance,
+        };
+      } else if (unit.returning) {
         destination = this.state.core;
       } else if (escortTarget) {
         const slotAngle = unit.kind === 'HARVESTER' ? (unit.escortSlot === 0 ? -0.65 : 0.65) : Math.PI;
@@ -583,7 +564,13 @@ class SwarmfallGame {
         };
       } else {
         const target = unit.kind === 'GUARD' ? findAsteroid(this.state, unit.targetId) : findDeposit(this.state, unit.targetId);
-        destination = target?.position ?? idleAnchor(this.state.lassos.get(unit.kind === 'GUARD' ? 'GUARDS' : 'HARVESTERS') ?? { points: [this.state.core] }, unit.index);
+        destination = target?.position ?? formationAnchor(
+          squad,
+          this.state.formations.get(squad) ?? 'SPREAD',
+          unit.index,
+          this.state.width,
+          this.state.height,
+        );
       }
 
       const desiredDirection = normalized({
@@ -698,13 +685,18 @@ class SwarmfallGame {
     const now = performance.now();
     if (!force && now - this.lastUiUpdate < 80) return;
     this.lastUiUpdate = now;
-    const strategy = getStrategy(this.activeStrategy);
     this.ui.score.textContent = Math.floor(this.state.score).toString().padStart(4, '0');
     this.ui.time.textContent = `00:${Math.ceil(this.state.timeRemaining).toString().padStart(2, '0')}`;
     this.ui.time.classList.toggle('danger', this.state.timeRemaining <= 10 && this.state.status === 'PLAYING');
-    this.ui.swarmStatus.textContent = this.state.status === 'PLAYING' ? 'AUTONOMY ENGAGED' : this.state.status;
-    this.ui.activeStrategy.textContent = strategy.label;
-    this.ui.strategyHint.textContent = 'Changes apply immediately';
+    this.ui.swarmStatus.textContent = this.state.status === 'PLAYING'
+      ? this.activeStrategy ? 'AUTONOMY ENGAGED' : 'MANUAL CONTROL'
+      : this.state.status;
+    this.ui.activeStrategy.textContent = this.activeStrategy
+      ? getStrategy(this.activeStrategy).label
+      : 'Manual gesture control';
+    this.ui.strategyHint.textContent = this.activeStrategy
+      ? 'Click again to switch to manual control'
+      : 'Gather, spread and point commands only';
     this.ui.selectedSquad.textContent = this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters';
     this.ui.strategyButtons.forEach((button) => {
       button.classList.toggle('active', button.dataset.strategy === this.activeStrategy);
@@ -749,39 +741,11 @@ class SwarmfallGame {
     for (const star of this.state.stars) {
       context.fillRect(star.x, star.y, 1, 1);
     }
-    this.drawLassos();
     this.drawDeposits();
     this.drawAsteroids();
     this.drawCore();
     this.drawUnits();
     this.drawEffects();
-    if (this.drawingPath) this.drawPath(this.drawingPath, this.selectedSquad === 'GUARDS' ? '#ff815b' : '#61d7d7', true);
-  }
-
-  private drawLassos(): void {
-    for (const [squad, lasso] of this.state.lassos) {
-      const active = squad === this.selectedSquad;
-      const color = squad === 'GUARDS' ? '#ff815b' : '#61d7d7';
-      this.drawPath(lasso.points, color, active);
-    }
-  }
-
-  private drawPath(points: readonly Point[], color: string, active: boolean): void {
-    if (points.length < 2) return;
-    const context = this.context;
-    context.save();
-    context.globalAlpha = active ? 0.85 : 0.35;
-    context.fillStyle = color.replace(')', ', .08)').replace('rgb', 'rgba');
-    context.beginPath();
-    context.moveTo(points[0].x, points[0].y);
-    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
-    context.closePath();
-    context.fill();
-    context.strokeStyle = color;
-    context.lineWidth = active ? 2.2 : 1.2;
-    context.setLineDash([7, 5]);
-    context.stroke();
-    context.restore();
   }
 
   private drawDeposits(): void {
@@ -958,13 +922,13 @@ function createUi(root: HTMLElement): UiRefs {
       </section>
       <main class="game-area">
         <div class="arena-frame">
-          <canvas id="arena" aria-label="Swarmfall tactical arena. Select a squad and draw its territory."></canvas>
+          <canvas id="arena" aria-label="Swarmfall tactical arena. Use commands to gather, spread and direct the selected units."></canvas>
           <div class="toast" id="toast" role="status" aria-live="polite"></div>
           <div class="overlay" id="round-overlay">
             <section class="overlay-card" id="intro-panel">
               <div class="eyebrow">One minute // One core</div>
               <h1>Command the swarm.</h1>
-              <p>Choose a squad, draw its territory, and let the autonomous units coordinate inside it. Native strategies are formation policies the game already supports.</p>
+              <p>Choose a unit type, gather or spread its formation, then point or drag to direct it.</p>
               <p class="tip">Five guards repel asteroids. Five harvesters mine and bank ore.</p>
               <button type="button" data-action="begin-round">Begin extraction</button>
             </section>
@@ -979,10 +943,15 @@ function createUi(root: HTMLElement): UiRefs {
           </div>
         </div>
         <aside class="side-panel" aria-label="Swarm commands">
-          <h2 class="panel-title">Squad territory</h2>
-          <p class="panel-copy">Draw a lasso for the selected squad. Each squad remembers its own territory.</p>
+          <h2 class="panel-title">Swarm commands</h2>
+          <p class="panel-copy">Closed fist gathers. Open palm spreads. Point directs. Thumbs up switches unit type.</p>
           <div class="squad-readout"><span class="label">Selected squad</span><strong id="selected-squad">Guards</strong></div>
-          <button class="switch-squad" type="button" data-action="switch-squad">Switch squad</button>
+          <div class="touch-commands">
+            <button type="button" data-action="gather-units">Gather</button>
+            <button type="button" data-action="spread-units">Spread</button>
+            <button type="button" data-action="switch-squad">Switch unit type</button>
+          </div>
+          <p class="panel-copy">Touch fallback: drag anywhere in the arena to direct the selected units.</p>
           <h2 class="panel-title">Native strategy</h2>
           <p class="panel-copy">These policies are built into the game. Later, natural language can select one safely.</p>
           <div class="strategy-list">
@@ -1005,6 +974,10 @@ function createUi(root: HTMLElement): UiRefs {
           <div class="settings-body">
             <nav class="settings-actions" aria-label="Remappable game actions" id="settings-action-list"></nav>
             <section class="settings-detail">
+              <div class="scheme-switch">
+                <div><span class="label">Control scheme</span><strong id="control-scheme-label">Touch controls</strong></div>
+                <button class="primary" id="control-scheme-toggle" type="button" data-action="toggle-control-scheme">Use gesture controls</button>
+              </div>
               <div>
                 <h3 id="settings-action-title">Choose an action</h3>
                 <p id="settings-action-description"></p>
@@ -1019,6 +992,18 @@ function createUi(root: HTMLElement): UiRefs {
                 <button class="secondary" id="settings-keep" type="button" data-action="keep-current-binding" hidden>Keep current input</button>
                 <button class="primary" id="settings-confirm" type="button" data-action="confirm-adaptive-binding" hidden>Use alternative input</button>
               </div>
+              <section class="training-panel" id="gesture-training">
+                <div><h3>Gesture training</h3><p>Try gestures without changing the live game.</p></div>
+                <div class="training-stage">
+                  <video id="adaptive-camera" muted playsinline aria-label="Mirrored camera preview"></video>
+                  <canvas id="training-canvas" width="640" height="360" aria-label="Training swarm overlay"></canvas>
+                  <div class="training-reading"><strong id="training-gesture">Camera off</strong><span id="training-confidence">Practice: fist, open palm, point, thumbs up</span></div>
+                </div>
+                <div class="button-row">
+                  <button class="primary" id="training-start" type="button" data-action="start-gesture-training">Start training</button>
+                  <button class="secondary" id="training-stop" type="button" data-action="stop-gesture-training" hidden>Stop training</button>
+                </div>
+              </section>
               <button class="restore-default" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore game default</button>
               <div class="vision-readout">
                 <span><span class="label">Visual input</span> <strong id="vision-status">Off</strong></span>
@@ -1028,7 +1013,6 @@ function createUi(root: HTMLElement): UiRefs {
           </div>
         </section>
       </div>
-      <video class="input-processing-video" id="adaptive-camera" muted playsinline aria-hidden="true" tabindex="-1"></video>
     </div>
   `;
 
@@ -1066,9 +1050,16 @@ function createUi(root: HTMLElement): UiRefs {
     settingsKeep: query<HTMLButtonElement>('#settings-keep'),
     settingsConfirm: query<HTMLButtonElement>('#settings-confirm'),
     settingsReset: query<HTMLButtonElement>('#settings-reset'),
+    schemeToggle: query<HTMLButtonElement>('#control-scheme-toggle'),
     visionStatus: query('#vision-status'),
     visionDetail: query('#vision-detail'),
     cameraVideo: query<HTMLVideoElement>('#adaptive-camera'),
+    trainingPanel: query('#gesture-training'),
+    trainingCanvas: query<HTMLCanvasElement>('#training-canvas'),
+    trainingGesture: query('#training-gesture'),
+    trainingConfidence: query('#training-confidence'),
+    trainingStart: query<HTMLButtonElement>('#training-start'),
+    trainingStop: query<HTMLButtonElement>('#training-stop'),
     strategyButtons: root.querySelectorAll<HTMLButtonElement>('[data-strategy]'),
   };
 }
@@ -1076,6 +1067,15 @@ function createUi(root: HTMLElement): UiRefs {
 function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): void {
   const selectedAction = view.actions.find((action) => action.id === view.selectedAction);
   if (!selectedAction) return;
+  const schemeLabel = ui.schemeToggle.parentElement?.querySelector<HTMLElement>('#control-scheme-label');
+  if (schemeLabel) {
+    schemeLabel.textContent = view.controlScheme === 'GESTURE'
+      ? 'Gesture controls'
+      : view.controlScheme === 'TOUCH' ? 'Touch controls' : 'Custom controls';
+  }
+  ui.schemeToggle.textContent = view.controlScheme === 'GESTURE'
+    ? 'Use touch controls'
+    : 'Use gesture controls';
 
   ui.settingsActionList.replaceChildren(
     ...view.actions.map((action) => {
@@ -1136,13 +1136,17 @@ function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): 
         view.sources.find((candidate) => candidate.id === source)?.label ?? source,
       );
       ui.settingsRecommendation.textContent =
-        `Test ${missingLabels.join(' and ')} before deciding whether to change this control.`;
-      ui.settingsTest.textContent = 'Start input test';
+        `Optional: test ${missingLabels.join(' and ')} for performance evidence, or use this input now.`;
+      ui.settingsTest.textContent = 'Optional input test';
+      ui.settingsConfirm.hidden = false;
+      ui.settingsConfirm.textContent = `Use ${preview.toLabel} now`;
     } else if (view.stage === 'PREPARE') {
       ui.settingsRecommendation.textContent =
         `Saved results are available from ${formatSavedResultDate(preview)}. Review them or test again.`;
       ui.settingsTest.textContent = 'Test again';
       ui.settingsReview.hidden = false;
+      ui.settingsConfirm.hidden = false;
+      ui.settingsConfirm.textContent = `Use ${preview.toLabel} now`;
     } else {
       const conflict = preview.conflicts.length > 0
         ? ` It will replace ${preview.conflicts.map((item) => item.label).join(', ')} in this context.`
@@ -1255,19 +1259,84 @@ function formatSavedResultDate(
   return new Date(oldestResult).toLocaleString();
 }
 
+function createTrainingPreview(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Training canvas context is unavailable.');
+  const units = Array.from({ length: 10 }, (_, index) => ({
+    kind: index < 5 ? 'GUARDS' as const : 'HARVESTERS' as const,
+    index: index % 5,
+    x: canvas.width * (index < 5 ? 0.38 : 0.62),
+    y: canvas.height * 0.5,
+  }));
+  let selected: Squad = 'GUARDS';
+  let mode: FormationMode = 'SPREAD';
+  let direction: Point | null = null;
+  let running = false;
+  let last = performance.now();
+
+  const frame = (now: number) => {
+    if (!running) return;
+    const delta = Math.min(0.04, (now - last) / 1000);
+    last = now;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    for (const unit of units) {
+      if (unit.kind === selected) {
+        const anchor = direction
+          ? { x: unit.x + direction.x * 110, y: unit.y + direction.y * 110 }
+          : formationAnchor(unit.kind, mode, unit.index, canvas.width, canvas.height);
+        const rate = 1 - Math.exp(-5 * delta);
+        unit.x += (anchor.x - unit.x) * rate;
+        unit.y += (anchor.y - unit.y) * rate;
+        unit.x = clamp(unit.x, 16, canvas.width - 16);
+        unit.y = clamp(unit.y, 16, canvas.height - 16);
+      }
+      context.fillStyle = unit.kind === 'GUARDS' ? '#ff815b' : '#61d7d7';
+      context.beginPath();
+      context.arc(unit.x, unit.y, unit.kind === selected ? 9 : 6, 0, TAU);
+      context.fill();
+    }
+    requestAnimationFrame(frame);
+  };
+
+  return {
+    start() { if (running) return; running = true; last = performance.now(); requestAnimationFrame(frame); },
+    stop() { running = false; context.clearRect(0, 0, canvas.width, canvas.height); },
+    accept(signal: InputSignal) {
+      if (signal.kind === 'direction') direction = signal.direction;
+      if (signal.kind === 'direction-end') direction = null;
+      if (signal.kind !== 'trigger') return;
+      direction = null;
+      if (signal.source === InputSourceId.HAND_CLOSED_FIST) mode = 'GATHERED';
+      if (signal.source === InputSourceId.HAND_OPEN_PALM) mode = 'SPREAD';
+      if (signal.source === InputSourceId.HAND_THUMB_UP) selected = selected === 'GUARDS' ? 'HARVESTERS' : 'GUARDS';
+    },
+  };
+}
+
+function trainingDiagnosticLabel(diagnostic: VisionDiagnostic): string {
+  if (diagnostic.detectedCommand === InputSourceId.HAND_CLOSED_FIST) return 'Closed fist · Gather';
+  if (diagnostic.detectedCommand === InputSourceId.HAND_OPEN_PALM) return 'Open palm · Spread';
+  if (diagnostic.detectedCommand === InputSourceId.HAND_THUMB_UP) return 'Thumbs up · Switch';
+  if (diagnostic.direction) return 'Pointing · Direct';
+  return diagnostic.commandState === 'LOCKED' ? 'Return to a neutral pose' : 'Neutral';
+}
+
 const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('App root is missing.');
 const ui = createUi(root);
+const trainingPreview = createTrainingPreview(ui.trainingCanvas);
 const canvas = root.querySelector<HTMLCanvasElement>('#arena');
 if (!canvas) throw new Error('Arena canvas is missing.');
+const arenaFrame = root.querySelector<HTMLElement>('.arena-frame');
+if (!arenaFrame) throw new Error('Arena frame is missing.');
 const bus = new GameActionBus();
 const showAttempt = (feedback: AdaptiveAttemptFeedback): void => {
   const confidence = feedback.confidence === undefined
     ? ''
     : ` (${Math.round(feedback.confidence * 100)}% confidence)`;
   ui.inputActivity.textContent = feedback.accepted
-    ? `${feedback.sourceLabel}${confidence} used for Switch squad`
-    : `${feedback.sourceLabel} did not run Switch squad; it currently uses ${feedback.bindingLabel}`;
+    ? `${feedback.sourceLabel}${confidence} used for ${feedback.actionLabel}`
+    : `${feedback.sourceLabel} did not run ${feedback.actionLabel}; it currently uses ${feedback.bindingLabel}`;
 };
 const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
   onAttempt: showAttempt,
@@ -1294,14 +1363,25 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
       REQUESTING: 'Permission requested',
       LOADING: 'Loading',
       READY: 'Active',
-      DENIED: 'Permission denied',
-      UNAVAILABLE: 'Unavailable',
       ERROR: 'Error',
     };
     ui.visionStatus.textContent = labels[status];
     ui.visionDetail.textContent = detail ?? '';
     ui.inputIndicator.classList.toggle('active', status === 'READY');
   },
+  onTrainingChanged: (active) => {
+    ui.trainingStart.hidden = active;
+    ui.trainingStop.hidden = !active;
+    ui.trainingGesture.textContent = active ? 'Show a gesture' : 'Camera off';
+    if (active) trainingPreview.start(); else trainingPreview.stop();
+  },
+  onTrainingDiagnostic: (diagnostic) => {
+    ui.trainingGesture.textContent = trainingDiagnosticLabel(diagnostic);
+    ui.trainingConfidence.textContent = diagnostic.direction
+      ? `Direction ${diagnostic.direction.x.toFixed(2)}, ${diagnostic.direction.y.toFixed(2)}`
+      : `${Math.round(diagnostic.commandConfidence * 100)}% confidence · ${diagnostic.commandState.toLowerCase()}`;
+  },
+  onTrainingSignal: (signal) => trainingPreview.accept(signal),
 });
 const pendingSettings = new URLSearchParams(window.location.search);
 if (pendingSettings.get('adaptiveControls') === 'review') {
@@ -1311,8 +1391,16 @@ if (pendingSettings.get('adaptiveControls') === 'review') {
   window.history.replaceState(null, '', '/');
 }
 wireUiInput(root, bus, adaptive);
-wireCanvasInput(canvas, bus);
+ui.schemeToggle.addEventListener('click', () => void adaptive.toggleControlScheme());
+wireCanvasInput(canvas, adaptive);
 const game = new SwarmfallGame(canvas, bus, ui);
-const resizeObserver = new ResizeObserver(() => game.resize());
-resizeObserver.observe(canvas);
+let resizeFrame: number | null = null;
+const resizeObserver = new ResizeObserver(() => {
+  if (resizeFrame !== null) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null;
+    game.resize();
+  });
+});
+resizeObserver.observe(arenaFrame);
 game.start();

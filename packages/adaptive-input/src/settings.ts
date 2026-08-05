@@ -176,8 +176,11 @@ export class BindingSettingsController<M extends object> {
   confirm(
     preview: BindingChangePreview<ActionKey<M>>,
     replaceConflicts: boolean = false,
+    allowUncalibrated: boolean = false,
   ): void {
-    if (!preview.readyToApply) throw new Error('Calibration is required before applying this binding.');
+    if (!preview.readyToApply && !allowUncalibrated) {
+      throw new Error('Calibration is required before applying this binding.');
+    }
     if (this.currentSource(preview.action) !== preview.from) {
       throw new Error('The binding changed after this recommendation was prepared.');
     }

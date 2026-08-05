@@ -15,6 +15,7 @@ export enum InputSourceId {
 
   HAND_CLOSED_FIST = 'HAND_CLOSED_FIST',
   HAND_OPEN_PALM = 'HAND_OPEN_PALM',
+  HAND_THUMB_UP = 'HAND_THUMB_UP',
   HAND_VICTORY = 'HAND_VICTORY',
   HAND_POINTING_UP = 'HAND_POINTING_UP',
   /** Pointing direction derived from hand landmarks, not a game movement command. */
@@ -30,6 +31,7 @@ const SOURCE_CHANNEL: Record<InputSourceId, InputChannelId> = {
   [InputSourceId.TOUCH_DIRECTION]: InputChannelId.TOUCH,
   [InputSourceId.HAND_CLOSED_FIST]: InputChannelId.HAND_VISION,
   [InputSourceId.HAND_OPEN_PALM]: InputChannelId.HAND_VISION,
+  [InputSourceId.HAND_THUMB_UP]: InputChannelId.HAND_VISION,
   [InputSourceId.HAND_VICTORY]: InputChannelId.HAND_VISION,
   [InputSourceId.HAND_POINTING_UP]: InputChannelId.HAND_VISION,
   [InputSourceId.HAND_POINT_DIRECTION]: InputChannelId.HAND_VISION,

@@ -39,6 +39,7 @@ export type {
   VisionStatus,
 } from './vision/visionInputChannel.ts';
 export * from './vision/closedFistGate.ts';
+export * from './vision/gestureCommandGate.ts';
 export * from './vision/pointDirection.ts';
 export type {
   ChannelContext,

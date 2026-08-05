@@ -2,6 +2,7 @@ import { FilesetResolver, GestureRecognizer } from '@mediapipe/tasks-vision';
 import { ChannelUnavailableError, type ChannelContext, type InputChannel } from '../channel.ts';
 import { InputChannelId, InputSourceId } from '../sources.ts';
 import { ClosedFistGate, type ClosedFistGateState } from './closedFistGate.ts';
+import { GestureCommandGate, type GestureCommandGateState } from './gestureCommandGate.ts';
 import { PointDirectionTracker, type DirectionVector } from './pointDirection.ts';
 
 export const MEDIAPIPE_TASKS_VISION_VERSION = '0.10.35';
@@ -15,6 +16,9 @@ export interface VisionDiagnostic {
   readonly fistState: ClosedFistGateState;
   readonly fistConfidence: number;
   readonly direction: DirectionVector | null;
+  readonly commandState: GestureCommandGateState;
+  readonly detectedCommand: InputSourceId | null;
+  readonly commandConfidence: number;
 }
 export interface VisionInputChannelOptions {
   readonly inferenceFps?: number;
@@ -24,7 +28,12 @@ export interface VisionInputChannelOptions {
 
 export class VisionInputChannel implements InputChannel {
   readonly id = InputChannelId.HAND_VISION;
-  readonly sources = [InputSourceId.HAND_CLOSED_FIST, InputSourceId.HAND_POINT_DIRECTION] as const;
+  readonly sources = [
+    InputSourceId.HAND_CLOSED_FIST,
+    InputSourceId.HAND_OPEN_PALM,
+    InputSourceId.HAND_THUMB_UP,
+    InputSourceId.HAND_POINT_DIRECTION,
+  ] as const;
   private recognizer: GestureRecognizer | null = null;
   private stream: MediaStream | null = null;
   private timer: number | null = null;
@@ -35,7 +44,11 @@ export class VisionInputChannel implements InputChannel {
   private generation = 0;
   private readonly point = new PointDirectionTracker();
   private readonly fist = new ClosedFistGate(({ timestamp, confidence }) => {
-    this.context?.emit({ kind: 'trigger', source: InputSourceId.HAND_CLOSED_FIST, timestamp, confidence });
+    void timestamp;
+    void confidence;
+  });
+  private readonly commands = new GestureCommandGate((candidate, timestamp) => {
+    this.context?.emit({ kind: 'trigger', source: candidate.source, timestamp, confidence: candidate.confidence });
   });
 
   constructor(
@@ -49,6 +62,10 @@ export class VisionInputChannel implements InputChannel {
 
   start(ctx: ChannelContext): Promise<void> {
     if (this.isActive) {
+      if (this.pointing) this.emitPointingEnd(performance.now());
+      this.fist.reset();
+      this.commands.reset();
+      this.point.reset();
       this.context = ctx;
       return Promise.resolve();
     }
@@ -74,6 +91,7 @@ export class VisionInputChannel implements InputChannel {
     this.processing = false;
     this.pointing = false;
     this.fist.reset();
+    this.commands.reset();
     this.point.reset();
     this.report('IDLE', 'Camera stopped. Touch controls remain available.');
   }
@@ -135,14 +153,23 @@ export class VisionInputChannel implements InputChannel {
       const result = this.recognizer.recognizeForVideo(this.video, timestamp);
       const fistConfidence = result.gestures[0]?.find((item) => item.categoryName === 'Closed_Fist')?.score ?? 0;
       this.fist.update({ timestamp, confidence: fistConfidence });
+      const detectedCommand = commandCandidate(result.gestures[0] ?? []);
+      this.commands.update(timestamp, detectedCommand);
       const direction = result.landmarks[0] ? this.point.update(result.landmarks[0]) : null;
-      if (direction) {
+      if (direction && this.commands.state === 'READY') {
         this.pointing = true;
         this.context?.emit({ kind: 'direction', source: InputSourceId.HAND_POINT_DIRECTION, timestamp, direction });
       } else if (this.pointing) {
         this.emitPointingEnd(timestamp);
       }
-      this.options.onDiagnostic?.({ fistState: this.fist.state, fistConfidence, direction });
+      this.options.onDiagnostic?.({
+        fistState: this.fist.state,
+        fistConfidence,
+        direction,
+        commandState: this.commands.state,
+        detectedCommand: detectedCommand?.source ?? null,
+        commandConfidence: detectedCommand?.confidence ?? 0,
+      });
     } catch (error: unknown) {
       if (this.pointing) this.emitPointingEnd(performance.now());
       this.report('ERROR', errorMessage(error));
@@ -168,11 +195,29 @@ export class VisionInputChannel implements InputChannel {
     this.recognizer = null;
     this.context = null;
     this.pointing = false;
+    this.fist.reset();
+    this.commands.reset();
+    this.point.reset();
   }
 
   private report(status: VisionStatus, detail: string): void {
     this.options.onStatus?.(status, detail);
   }
+}
+
+function commandCandidate(
+  gestures: readonly { readonly categoryName: string; readonly score: number }[],
+): { source: InputSourceId; confidence: number } | null {
+  const definitions = [
+    ['Closed_Fist', InputSourceId.HAND_CLOSED_FIST],
+    ['Open_Palm', InputSourceId.HAND_OPEN_PALM],
+    ['Thumb_Up', InputSourceId.HAND_THUMB_UP],
+  ] as const;
+  const candidates = definitions.flatMap(([categoryName, source]) => {
+    const match = gestures.find((gesture) => gesture.categoryName === categoryName);
+    return match ? [{ source, confidence: match.score }] : [];
+  });
+  return candidates.sort((left, right) => right.confidence - left.confidence)[0] ?? null;
 }
 
 function errorMessage(error: unknown): string {
