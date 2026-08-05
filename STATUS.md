@@ -43,8 +43,8 @@ game-agnostic adaptive-input layer is the product.
 | Runtime rebind | Complete locally | Phone smoke tests confirmed bindings change and survive refresh. |
 | Gesture training | Complete locally | Live camera feedback previews gather, spread, switch and direction without rebinding. |
 | Mobile Swarmfall host | Complete locally; review pending | Directional control, optional tactics, responsive zones and phone layout are working. |
-| Before/after validation | Partial | Side-by-side measurements exist; decide whether a distinct post-binding rerun is required. |
-| Live HUD requirement | Partial | Input, confidence and mapped action are visible; gameplay latency is not yet shown. |
+| Control comparison and live validation | Complete locally | Touch and alternative-input measurements are compared before approval; the accepted binding is then verified in gameplay. |
+| Runtime input feedback | Complete locally | Gameplay shows detected input, confidence and mapped action. Reaction latency is measured only during prompted calibration. |
 | HTTPS deployment | Temporary | The Cloudflare review tunnel works but is not a durable submission deployment. |
 | Formal integration | Pending | Team review, shared-branch verification and merge to `main` are planned for 7 August. |
 
@@ -167,8 +167,8 @@ system and browser version still need to be recorded for the submission.
    time. Compare phone and laptop extraction speed and correct it before freeze.
 2. Confirm whether restored touch bindings after a camera failure are also persisted across the
    next reload.
-3. Decide whether navigation to the calibration route satisfies the planned “without reload” flow
-   and whether an in-place or post-binding validation pass is required.
+3. Confirm the calibration-to-controls navigation and accepted binding once more after formal
+   integration; a separate post-binding calibration rerun is not required.
 4. Record phone model, OS, browser, lighting, left/right point signs and repeated camera-stop
    indicator behavior.
 5. Deploy a stable HTTPS submission URL after merging the reviewed branch.
@@ -179,8 +179,8 @@ system and browser version still need to be recorded for the submission.
 
 | Owner | Reviews |
 |---|---|
-| **Lucius — Core & Touch** | Public middleware contract, binding, telemetry, calibration, recommendation and integration. |
-| **Vivin — Vision** | MediaPipe recognition, confidence, direction output and camera lifecycle behavior. |
+| **Lucius — Core & Touch** | Public middleware contract, binding, telemetry, saved scores, recommendation and integration. |
+| **Vivin — Vision & Calibration** | MediaPipe recognition, confidence, direction output, camera lifecycle and the calibration system. |
 | **Mark — Demo Host** | Swarmfall mechanics, action effects, responsive gameplay and final host acceptance. |
 
 ## Integration boundary
