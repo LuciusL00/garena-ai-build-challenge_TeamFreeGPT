@@ -14,7 +14,7 @@ import { InputSourceId } from '../../../packages/adaptive-input/src/index.ts';
 import { GameActionBus, type Squad } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import { wireCanvasInput, wireUiInput } from './input.ts';
-import { getArenaLayout, type Point } from './ui/layout.ts';
+import { getArenaLayout, getInitialSquadCenter, type Point } from './ui/layout.ts';
 import {
   getStrategy,
   STRATEGIES,
@@ -82,7 +82,7 @@ interface GameState {
   asteroids: Asteroid[];
   deposits: Deposit[];
   formations: Map<Squad, FormationMode>;
-  directions: Map<Squad, Point | null>;
+  squadCenters: Map<Squad, Point>;
   effects: Effect[];
   stars: Point[];
 }
@@ -153,11 +153,22 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function formationAnchor(squad: Squad, mode: FormationMode, index: number, width: number, height: number): Point {
-  const centre = squad === 'GUARDS' ? { x: width * 0.38, y: height * 0.42 } : { x: width * 0.62, y: height * 0.62 };
+function squadForKind(kind: UnitKind): Squad {
+  return kind === 'GUARD' ? 'GUARDS' : 'HARVESTERS';
+}
+
+function formationAnchor(center: Point, kind: UnitKind, mode: FormationMode, index: number): Point {
   const radius = mode === 'GATHERED' ? BALANCE.gatherRadius : BALANCE.spreadRadius;
-  const angle = (index / 5) * TAU;
-  return { x: centre.x + Math.cos(angle) * radius, y: centre.y + Math.sin(angle) * radius };
+  const count = kind === 'GUARD' ? BALANCE.guardCount : BALANCE.harvesterCount;
+  const phase = kind === 'GUARD' ? -Math.PI / 2 : Math.PI / 2;
+  const angle = phase + (index / count) * TAU;
+  return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
+}
+
+function activityRadius(mode: FormationMode): number {
+  return mode === 'GATHERED'
+    ? BALANCE.squadActivityGatherRadius
+    : BALANCE.squadActivitySpreadRadius;
 }
 
 function makeStars(width: number, height: number): Point[] {
@@ -170,6 +181,10 @@ function makeStars(width: number, height: number): Point[] {
 function createRoundState(width: number, height: number): GameState {
   const layout = getArenaLayout(width, height);
   const formations = new Map<Squad, FormationMode>([['GUARDS', 'SPREAD'], ['HARVESTERS', 'SPREAD']]);
+  const squadCenters = new Map<Squad, Point>([
+    ['GUARDS', getInitialSquadCenter('GUARDS', width, height)],
+    ['HARVESTERS', getInitialSquadCenter('HARVESTERS', width, height)],
+  ]);
   const state: GameState = {
     width,
     height,
@@ -184,13 +199,14 @@ function createRoundState(width: number, height: number): GameState {
     asteroids: [],
     deposits: [],
     formations,
-    directions: new Map<Squad, Point | null>([['GUARDS', null], ['HARVESTERS', null]]),
+    squadCenters,
     effects: [],
     stars: makeStars(width, height),
   };
 
   for (let index = 0; index < BALANCE.guardCount; index += 1) {
-    const anchor = formationAnchor('GUARDS', 'SPREAD', index, width, height);
+    const center = squadCenters.get('GUARDS') ?? layout.core;
+    const anchor = formationAnchor(center, 'GUARD', 'SPREAD', index);
     state.units.push({
       id: state.nextId++,
       kind: 'GUARD',
@@ -205,7 +221,8 @@ function createRoundState(width: number, height: number): GameState {
   }
 
   for (let index = 0; index < BALANCE.harvesterCount; index += 1) {
-    const anchor = formationAnchor('HARVESTERS', 'SPREAD', index, width, height);
+    const center = squadCenters.get('HARVESTERS') ?? layout.core;
+    const anchor = formationAnchor(center, 'HARVESTER', 'SPREAD', index);
     state.units.push({
       id: state.nextId++,
       kind: 'HARVESTER',
@@ -298,7 +315,8 @@ class SwarmfallGame {
   private readonly canvas: HTMLCanvasElement;
   private readonly bus: GameActionBus;
   private selectedSquad: Squad = 'GUARDS';
-  private activeStrategy: StrategyId | null = 'MINER_PROTECT';
+  private activeStrategy: StrategyId | null = null;
+  private movementDirection: Point | null = null;
   private lastFrame = 0;
   private lastUiUpdate = 0;
   private toastUntil = 0;
@@ -344,6 +362,9 @@ class SwarmfallGame {
         deposit.position = scalePoint(deposit.position, xScale, yScale);
       });
       this.state.stars = this.state.stars.map((star) => scalePoint(star, xScale, yScale));
+      this.state.squadCenters.forEach((center, squad) => {
+        this.state.squadCenters.set(squad, scalePoint(center, xScale, yScale));
+      });
     }
     this.state.width = width;
     this.state.height = height;
@@ -367,23 +388,28 @@ class SwarmfallGame {
     });
     this.bus.on('GATHER_UNITS', () => {
       this.state.formations.set(this.selectedSquad, 'GATHERED');
-      this.state.directions.set(this.selectedSquad, null);
+      this.movementDirection = null;
       this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} gathering`);
     });
     this.bus.on('SPREAD_UNITS', () => {
       this.state.formations.set(this.selectedSquad, 'SPREAD');
-      this.state.directions.set(this.selectedSquad, null);
+      this.movementDirection = null;
       this.showToast(`${this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters'} spreading out`);
     });
     this.bus.on('DIRECT_UNITS', ({ direction }) => {
-      this.state.directions.set(this.selectedSquad, direction);
+      if (this.state.status !== 'PLAYING' || direction === null) {
+        this.movementDirection = null;
+        return;
+      }
+      const nextDirection = normalized(direction);
+      this.movementDirection = Math.hypot(nextDirection.x, nextDirection.y) > 0.001
+        ? nextDirection
+        : null;
     });
     this.bus.on('SELECT_STRATEGY', ({ strategyId }) => {
       if (this.activeStrategy === strategyId) {
         this.activeStrategy = null;
-        this.state.directions.set('GUARDS', null);
-        this.state.directions.set('HARVESTERS', null);
-        this.showToast('Manual gesture control active');
+        this.showToast('Normal squad jobs active');
       } else {
         this.activeStrategy = strategyId;
         this.showToast(`Strategy active: ${getStrategy(strategyId).label}`);
@@ -397,14 +423,16 @@ class SwarmfallGame {
   private beginRound(): void {
     this.state = createRoundState(this.state.width, this.state.height);
     this.state.status = 'PLAYING';
+    this.movementDirection = null;
     this.showToast(this.activeStrategy
       ? `Strategy active: ${getStrategy(this.activeStrategy).label}`
-      : 'Manual gesture control active');
+      : 'Normal squad jobs active');
     this.updateUi(true);
   }
 
   private resetToIntro(): void {
     this.state = createRoundState(this.state.width, this.state.height);
+    this.movementDirection = null;
     this.updateUi(true);
   }
 
@@ -431,6 +459,7 @@ class SwarmfallGame {
       this.state.depositTimer = BALANCE.depositSpawnSeconds;
     }
 
+    this.updateSquadCenter(delta);
     this.assignTargets();
     this.updateAsteroids(delta);
     this.updateUnits(delta);
@@ -442,19 +471,35 @@ class SwarmfallGame {
     if (this.state.timeRemaining <= 0) this.finishRound();
   }
 
+  private updateSquadCenter(delta: number): void {
+    if (!this.movementDirection) return;
+    const center = this.state.squadCenters.get(this.selectedSquad);
+    if (!center) return;
+    center.x = clamp(
+      center.x + this.movementDirection.x * BALANCE.squadCommandSpeed * delta,
+      BALANCE.squadActivityEdgePadding,
+      this.state.width - BALANCE.squadActivityEdgePadding,
+    );
+    center.y = clamp(
+      center.y + this.movementDirection.y * BALANCE.squadCommandSpeed * delta,
+      BALANCE.squadActivityEdgePadding,
+      this.state.height - BALANCE.squadActivityEdgePadding,
+    );
+  }
+
   private assignTargets(): void {
-    if (this.activeStrategy === null) {
-      this.state.units.forEach((unit) => {
-        unit.targetId = undefined;
-        unit.escortTargetUnitId = undefined;
-        unit.escortSlot = undefined;
-      });
-      return;
-    }
-    const strategy = getStrategy(this.activeStrategy);
+    const strategy = this.activeStrategy ? getStrategy(this.activeStrategy) : null;
+    const guardPolicy = strategy?.guardPolicy ?? 'INTERCEPT_THREATS';
+    const harvesterPolicy = strategy?.harvesterPolicy ?? 'MINE_AND_BANK';
     const guardCounts = new Map<number, number>();
     const harvesterCounts = new Map<number, number>();
     const escortCounts = new Map<number, number>();
+    const guardCenter = this.state.squadCenters.get('GUARDS') ?? this.state.core;
+    const harvesterCenter = this.state.squadCenters.get('HARVESTERS') ?? this.state.core;
+    const guardMode = this.state.formations.get('GUARDS') ?? 'SPREAD';
+    const harvesterMode = this.state.formations.get('HARVESTERS') ?? 'SPREAD';
+    const guardActivityRadius = activityRadius(guardMode);
+    const harvesterActivityRadius = activityRadius(harvesterMode);
     const loadedMiners = this.state.units.filter(
       (unit) => unit.kind === 'HARVESTER' && (unit.returning || unit.cargo >= BALANCE.harvesterCargoCapacity),
     );
@@ -464,8 +509,9 @@ class SwarmfallGame {
       unit.escortTargetUnitId = undefined;
       unit.escortSlot = undefined;
       if (unit.kind === 'GUARD') {
-        if (strategy.guardPolicy === 'ESCORT_LOADED_MINER') {
+        if (guardPolicy === 'ESCORT_LOADED_MINER') {
           const escortTarget = loadedMiners
+            .filter((miner) => distance(miner.position, guardCenter) <= guardActivityRadius)
             .filter((miner) => !escortCounts.has(miner.id))
             .sort((left, right) => distance(unit.position, left.position) - distance(unit.position, right.position))[0];
           if (escortTarget) {
@@ -475,19 +521,23 @@ class SwarmfallGame {
             continue;
           }
         }
-        const candidates = this.state.asteroids;
+        const candidates = this.state.asteroids.filter(
+          (asteroid) => distance(asteroid.position, guardCenter) <= guardActivityRadius,
+        );
         const target = candidates
           .map((asteroid) => {
             const existing = guardCounts.get(asteroid.id) ?? 0;
             const unitDistance = distance(unit.position, asteroid.position);
-            const crowdingPenalty = strategy.guardPolicy === 'SPREAD_FORMATION' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
+            const crowdingPenalty = guardMode === 'SPREAD'
+              ? BALANCE.spreadCrowdingPenalty
+              : BALANCE.gatherCrowdingPenalty;
             return { asteroid, score: unitDistance + existing * crowdingPenalty };
           })
           .sort((left, right) => left.score - right.score)[0]?.asteroid;
         unit.targetId = target?.id;
         if (target) guardCounts.set(target.id, (guardCounts.get(target.id) ?? 0) + 1);
       } else if (!unit.returning && unit.cargo < BALANCE.harvesterCargoCapacity) {
-        if (strategy.harvesterPolicy === 'PROTECT_LOADED_MINER') {
+        if (harvesterPolicy === 'PROTECT_LOADED_MINER') {
           const escortTarget = loadedMiners
             .map((miner) => ({ miner, count: escortCounts.get(miner.id) ?? 0 }))
             .filter(({ count }) => count < BALANCE.minerEscortCount)
@@ -500,12 +550,21 @@ class SwarmfallGame {
             continue;
           }
         }
-        const candidates = this.state.deposits;
+        const nearbyDeposits = this.state.deposits.filter(
+          (deposit) => distance(deposit.position, harvesterCenter) <= harvesterActivityRadius,
+        );
+        const candidates = nearbyDeposits.length > 0
+          ? nearbyDeposits
+          : [...this.state.deposits]
+              .sort((left, right) => distance(left.position, harvesterCenter) - distance(right.position, harvesterCenter))
+              .slice(0, 1);
         const target = candidates
           .map((deposit) => {
             const existing = harvesterCounts.get(deposit.id) ?? 0;
             const unitDistance = distance(unit.position, deposit.position);
-            const crowdingPenalty = strategy.harvesterPolicy === 'SPREAD_FORMATION' ? BALANCE.spreadCrowdingPenalty : BALANCE.targetCrowdingPenalty;
+            const crowdingPenalty = harvesterMode === 'SPREAD'
+              ? BALANCE.spreadCrowdingPenalty
+              : BALANCE.gatherCrowdingPenalty;
             return { deposit, score: unitDistance + existing * crowdingPenalty };
           })
           .sort((left, right) => left.score - right.score)[0]?.deposit;
@@ -545,14 +604,13 @@ class SwarmfallGame {
       if (unit.kind === 'HARVESTER' && unit.cargo >= BALANCE.harvesterCargoCapacity) unit.returning = true;
 
       let destination: Point;
-      const squad: Squad = unit.kind === 'GUARD' ? 'GUARDS' : 'HARVESTERS';
-      const directed = this.state.directions.get(squad);
+      const squad = squadForKind(unit.kind);
+      const center = this.state.squadCenters.get(squad) ?? this.state.core;
+      const mode = this.state.formations.get(squad) ?? 'SPREAD';
+      const underDirectionalControl = this.movementDirection !== null && squad === this.selectedSquad;
       const escortTarget = findUnit(this.state, unit.escortTargetUnitId);
-      if (directed) {
-        destination = {
-          x: unit.position.x + directed.x * BALANCE.directedDistance,
-          y: unit.position.y + directed.y * BALANCE.directedDistance,
-        };
+      if (underDirectionalControl) {
+        destination = formationAnchor(center, unit.kind, mode, unit.index);
       } else if (unit.returning) {
         destination = this.state.core;
       } else if (escortTarget) {
@@ -564,13 +622,7 @@ class SwarmfallGame {
         };
       } else {
         const target = unit.kind === 'GUARD' ? findAsteroid(this.state, unit.targetId) : findDeposit(this.state, unit.targetId);
-        destination = target?.position ?? formationAnchor(
-          squad,
-          this.state.formations.get(squad) ?? 'SPREAD',
-          unit.index,
-          this.state.width,
-          this.state.height,
-        );
+        destination = target?.position ?? formationAnchor(center, unit.kind, mode, unit.index);
       }
 
       const desiredDirection = normalized({
@@ -671,6 +723,7 @@ class SwarmfallGame {
 
   private finishRound(): void {
     this.state.status = 'FINISHED';
+    this.movementDirection = null;
     this.showToast('Extraction window closed');
     this.updateUi(true);
   }
@@ -689,14 +742,14 @@ class SwarmfallGame {
     this.ui.time.textContent = `00:${Math.ceil(this.state.timeRemaining).toString().padStart(2, '0')}`;
     this.ui.time.classList.toggle('danger', this.state.timeRemaining <= 10 && this.state.status === 'PLAYING');
     this.ui.swarmStatus.textContent = this.state.status === 'PLAYING'
-      ? this.activeStrategy ? 'AUTONOMY ENGAGED' : 'MANUAL CONTROL'
+      ? `${this.selectedSquad === 'GUARDS' ? 'GUARDS' : 'HARVESTERS'} ${this.movementDirection ? 'MOVING' : 'WORKING'}`
       : this.state.status;
     this.ui.activeStrategy.textContent = this.activeStrategy
       ? getStrategy(this.activeStrategy).label
-      : 'Manual gesture control';
+      : 'Normal jobs';
     this.ui.strategyHint.textContent = this.activeStrategy
-      ? 'Click again to switch to manual control'
-      : 'Gather, spread and point commands only';
+      ? 'Choose it again to return to normal jobs'
+      : 'Strategies are optional';
     this.ui.selectedSquad.textContent = this.selectedSquad === 'GUARDS' ? 'Guards' : 'Harvesters';
     this.ui.strategyButtons.forEach((button) => {
       button.classList.toggle('active', button.dataset.strategy === this.activeStrategy);
@@ -741,11 +794,61 @@ class SwarmfallGame {
     for (const star of this.state.stars) {
       context.fillRect(star.x, star.y, 1, 1);
     }
+    this.drawActivityZones();
     this.drawDeposits();
     this.drawAsteroids();
     this.drawCore();
     this.drawUnits();
     this.drawEffects();
+  }
+
+  private drawActivityZones(): void {
+    for (const [squad, center] of this.state.squadCenters) {
+      const active = squad === this.selectedSquad;
+      const mode = this.state.formations.get(squad) ?? 'SPREAD';
+      const radius = activityRadius(mode);
+      const color = squad === 'GUARDS' ? '#ff815b' : '#61d7d7';
+      const context = this.context;
+      context.save();
+      context.globalAlpha = active ? 0.09 : 0.025;
+      context.fillStyle = color;
+      context.beginPath();
+      context.arc(center.x, center.y, radius, 0, TAU);
+      context.fill();
+      context.globalAlpha = active ? 0.78 : 0.24;
+      context.strokeStyle = color;
+      context.lineWidth = active ? 2.2 : 1.2;
+      context.setLineDash([7, 5]);
+      context.stroke();
+      context.setLineDash([]);
+      context.beginPath();
+      context.arc(center.x, center.y, active ? 6 : 4, 0, TAU);
+      context.fill();
+
+      if (active && this.movementDirection) {
+        const tip = {
+          x: center.x + this.movementDirection.x * BALANCE.movementIndicatorLength,
+          y: center.y + this.movementDirection.y * BALANCE.movementIndicatorLength,
+        };
+        const angle = Math.atan2(this.movementDirection.y, this.movementDirection.x);
+        context.globalAlpha = 1;
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(center.x, center.y);
+        context.lineTo(tip.x, tip.y);
+        context.lineTo(
+          tip.x - Math.cos(angle - Math.PI / 5) * BALANCE.movementIndicatorArrowSize,
+          tip.y - Math.sin(angle - Math.PI / 5) * BALANCE.movementIndicatorArrowSize,
+        );
+        context.moveTo(tip.x, tip.y);
+        context.lineTo(
+          tip.x - Math.cos(angle + Math.PI / 5) * BALANCE.movementIndicatorArrowSize,
+          tip.y - Math.sin(angle + Math.PI / 5) * BALANCE.movementIndicatorArrowSize,
+        );
+        context.stroke();
+      }
+      context.restore();
+    }
   }
 
   private drawDeposits(): void {
@@ -905,7 +1008,7 @@ function createUi(root: HTMLElement): UiRefs {
       <header class="topbar">
         <div>
           <div class="brand">SWARMFALL</div>
-          <div class="eyebrow">Extraction Protocol // Native Strategy Host</div>
+          <div class="eyebrow">Extraction Protocol // Adaptive Control Host</div>
         </div>
         <div class="topbar-actions">
           <div class="mission">Hold the core. Bank the ore.</div>
@@ -928,7 +1031,7 @@ function createUi(root: HTMLElement): UiRefs {
             <section class="overlay-card" id="intro-panel">
               <div class="eyebrow">One minute // One core</div>
               <h1>Command the swarm.</h1>
-              <p>Choose a unit type, gather or spread its formation, then point or drag to direct it.</p>
+              <p>Choose a unit type, gather or spread its formation, then drag or point in the direction it should move.</p>
               <p class="tip">Five guards repel asteroids. Five harvesters mine and bank ore.</p>
               <button type="button" data-action="begin-round">Begin extraction</button>
             </section>
@@ -952,12 +1055,12 @@ function createUi(root: HTMLElement): UiRefs {
             <button type="button" data-action="switch-squad">Switch unit type</button>
           </div>
           <p class="panel-copy">Touch fallback: drag anywhere in the arena to direct the selected units.</p>
-          <h2 class="panel-title">Native strategy</h2>
-          <p class="panel-copy">These policies are built into the game. Later, natural language can select one safely.</p>
+          <h2 class="panel-title">Optional tactics</h2>
+          <p class="panel-copy">Squads already mine and defend. These built-in tactics only adjust how they support loaded miners.</p>
           <div class="strategy-list">
-            ${STRATEGIES.map((strategy) => `<button class="strategy${strategy.id === 'MINER_PROTECT' ? ' active' : ''}" type="button" data-strategy="${strategy.id}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
+            ${STRATEGIES.map((strategy) => `<button class="strategy" type="button" data-strategy="${strategy.id}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
           </div>
-          <div class="active-strategy"><span class="label">Active strategy</span><strong id="active-strategy">Miner Protect</strong><span class="microcopy" id="strategy-hint">Changes apply immediately</span></div>
+          <div class="active-strategy"><span class="label">Active tactic</span><strong id="active-strategy">Normal jobs</strong><span class="microcopy" id="strategy-hint">Tactics are optional</span></div>
         </aside>
       </main>
       <footer class="bottom-bar">
@@ -1136,10 +1239,10 @@ function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): 
         view.sources.find((candidate) => candidate.id === source)?.label ?? source,
       );
       ui.settingsRecommendation.textContent =
-        `Optional: test ${missingLabels.join(' and ')} for performance evidence, or use this input now.`;
+        `Test ${missingLabels.join(' and ')} for performance evidence, or continue without testing.`;
       ui.settingsTest.textContent = 'Optional input test';
       ui.settingsConfirm.hidden = false;
-      ui.settingsConfirm.textContent = `Use ${preview.toLabel} now`;
+      ui.settingsConfirm.textContent = `Use ${preview.toLabel} without testing`;
     } else if (view.stage === 'PREPARE') {
       ui.settingsRecommendation.textContent =
         `Saved results are available from ${formatSavedResultDate(preview)}. Review them or test again.`;
@@ -1281,9 +1384,11 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
     context.clearRect(0, 0, canvas.width, canvas.height);
     for (const unit of units) {
       if (unit.kind === selected) {
+        const center = getInitialSquadCenter(unit.kind, canvas.width, canvas.height);
+        const kind: UnitKind = unit.kind === 'GUARDS' ? 'GUARD' : 'HARVESTER';
         const anchor = direction
           ? { x: unit.x + direction.x * 110, y: unit.y + direction.y * 110 }
-          : formationAnchor(unit.kind, mode, unit.index, canvas.width, canvas.height);
+          : formationAnchor(center, kind, mode, unit.index);
         const rate = 1 - Math.exp(-5 * delta);
         unit.x += (anchor.x - unit.x) * rate;
         unit.y += (anchor.y - unit.y) * rate;

@@ -1,4 +1,5 @@
 import type { GameActionBus } from './actionBus.ts';
+import { BALANCE } from './config/balance.ts';
 import type { StrategyId } from './strategy.ts';
 
 export interface AdaptiveUiActions {
@@ -17,35 +18,39 @@ export interface AdaptiveUiActions {
   stopTraining(): void;
 }
 
-function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent) {
-  const bounds = canvas.getBoundingClientRect();
-  return {
-    x: ((event.clientX - bounds.left) / bounds.width) * canvas.clientWidth,
-    y: ((event.clientY - bounds.top) / bounds.height) * canvas.clientHeight,
-  };
+interface PointerPosition {
+  x: number;
+  y: number;
+}
+
+function pointerPosition(event: PointerEvent): PointerPosition {
+  return { x: event.clientX, y: event.clientY };
+}
+
+function joystickDirection(origin: PointerPosition, current: PointerPosition): { x: number; y: number } | null {
+  const delta = { x: current.x - origin.x, y: current.y - origin.y };
+  const length = Math.hypot(delta.x, delta.y);
+  if (length <= BALANCE.joystickDeadZonePx) return null;
+  return { x: delta.x / length, y: delta.y / length };
 }
 
 export function wireCanvasInput(canvas: HTMLCanvasElement, adaptive: AdaptiveUiActions): () => void {
   let activePointer: number | null = null;
+  let origin: PointerPosition | null = null;
 
   const onPointerDown = (event: PointerEvent) => {
     if (activePointer !== null) return;
     activePointer = event.pointerId;
+    origin = pointerPosition(event);
     canvas.setPointerCapture(event.pointerId);
     event.preventDefault();
-    const point = canvasPoint(canvas, event);
-    const centre = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
-    const length = Math.hypot(point.x - centre.x, point.y - centre.y) || 1;
-    adaptive.attemptTouchDirection({ x: (point.x - centre.x) / length, y: (point.y - centre.y) / length });
+    adaptive.attemptTouchDirection(null);
   };
 
   const onPointerMove = (event: PointerEvent) => {
-    if (activePointer !== event.pointerId) return;
+    if (activePointer !== event.pointerId || !origin) return;
     event.preventDefault();
-    const point = canvasPoint(canvas, event);
-    const centre = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
-    const length = Math.hypot(point.x - centre.x, point.y - centre.y) || 1;
-    adaptive.attemptTouchDirection({ x: (point.x - centre.x) / length, y: (point.y - centre.y) / length });
+    adaptive.attemptTouchDirection(joystickDirection(origin, pointerPosition(event)));
   };
 
   const finish = (event: PointerEvent) => {
@@ -53,6 +58,7 @@ export function wireCanvasInput(canvas: HTMLCanvasElement, adaptive: AdaptiveUiA
     event.preventDefault();
     adaptive.attemptTouchDirection(null);
     activePointer = null;
+    origin = null;
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   };
 
@@ -62,6 +68,7 @@ export function wireCanvasInput(canvas: HTMLCanvasElement, adaptive: AdaptiveUiA
   canvas.addEventListener('pointercancel', finish);
 
   return () => {
+    if (activePointer !== null) adaptive.attemptTouchDirection(null);
     canvas.removeEventListener('pointerdown', onPointerDown);
     canvas.removeEventListener('pointermove', onPointerMove);
     canvas.removeEventListener('pointerup', finish);

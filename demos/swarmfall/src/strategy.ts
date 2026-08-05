@@ -1,7 +1,7 @@
-export type StrategyId = 'MINER_PROTECT' | 'ESCORT' | 'SPREAD';
+export type StrategyId = 'MINER_PROTECT' | 'ESCORT';
 
-export type GuardPolicy = 'INTERCEPT_THREATS' | 'ESCORT_LOADED_MINER' | 'SPREAD_FORMATION';
-export type HarvesterPolicy = 'MINE_AND_BANK' | 'PROTECT_LOADED_MINER' | 'SPREAD_FORMATION';
+export type GuardPolicy = 'INTERCEPT_THREATS' | 'ESCORT_LOADED_MINER';
+export type HarvesterPolicy = 'MINE_AND_BANK' | 'PROTECT_LOADED_MINER';
 
 export interface StrategyDefinition {
   id: StrategyId;
@@ -25,13 +25,6 @@ export const STRATEGIES: readonly StrategyDefinition[] = [
     description: 'A guard follows each loaded miner inside the guard territory.',
     guardPolicy: 'ESCORT_LOADED_MINER',
     harvesterPolicy: 'MINE_AND_BANK',
-  },
-  {
-    id: 'SPREAD',
-    label: 'Spread Formation',
-    description: 'Both squads distribute broadly instead of clustering.',
-    guardPolicy: 'SPREAD_FORMATION',
-    harvesterPolicy: 'SPREAD_FORMATION',
   },
 ];
 
