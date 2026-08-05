@@ -39,6 +39,9 @@ interface Unit {
   escortSlot?: number;
   impactCooldown: number;
   flash: number;
+  idleTarget?: Point;
+  idlePause: number;
+  heading: number;
 }
 
 interface Asteroid {
@@ -176,6 +179,12 @@ function activityRadius(mode: FormationMode): number {
     : BALANCE.squadActivitySpreadRadius;
 }
 
+function idlePatrolRadius(mode: FormationMode): number {
+  return mode === 'GATHERED'
+    ? BALANCE.idleGatherPatrolRadius
+    : BALANCE.idleSpreadPatrolRadius;
+}
+
 function makeStars(width: number, height: number): Point[] {
   return Array.from({ length: 70 }, () => ({
     x: Math.random() * width,
@@ -222,6 +231,8 @@ function createRoundState(width: number, height: number): GameState {
       returning: false,
       impactCooldown: 0,
       flash: 0,
+      idlePause: 0,
+      heading: 0,
     });
   }
 
@@ -238,6 +249,8 @@ function createRoundState(width: number, height: number): GameState {
       returning: false,
       impactCooldown: 0,
       flash: 0,
+      idlePause: 0,
+      heading: 0,
     });
   }
 
@@ -647,6 +660,7 @@ class SwarmfallGame {
       const mode = this.state.formations.get(squad) ?? 'SPREAD';
       const underDirectionalControl = this.movementDirection !== null && squad === this.selectedSquad;
       const escortTarget = findUnit(this.state, unit.escortTargetUnitId);
+      let idlePatrolling = false;
       if (underDirectionalControl) {
         destination = formationAnchor(center, unit.kind, mode, unit.index);
       } else if (unit.returning) {
@@ -660,14 +674,24 @@ class SwarmfallGame {
         };
       } else {
         const target = unit.kind === 'GUARD' ? findAsteroid(this.state, unit.targetId) : findDeposit(this.state, unit.targetId);
-        destination = target?.position ?? formationAnchor(center, unit.kind, mode, unit.index);
+        if (target) destination = target.position;
+        else {
+          idlePatrolling = true;
+          destination = this.idleDestination(unit, center, mode, delta);
+        }
+      }
+
+      if (!idlePatrolling) {
+        unit.idleTarget = undefined;
+        unit.idlePause = 0;
       }
 
       const desiredDirection = normalized({
         x: destination.x - unit.position.x,
         y: destination.y - unit.position.y,
       });
-      const speed = unit.kind === 'GUARD' ? BALANCE.guardSpeed : BALANCE.harvesterSpeed;
+      const baseSpeed = unit.kind === 'GUARD' ? BALANCE.guardSpeed : BALANCE.harvesterSpeed;
+      const speed = idlePatrolling ? baseSpeed * BALANCE.idleSpeedMultiplier : baseSpeed;
       const rate = 1 - Math.exp(-BALANCE.unitAcceleration * delta);
       const desiredVelocity = { x: desiredDirection.x * speed, y: desiredDirection.y * speed };
       unit.velocity.x += (desiredVelocity.x - unit.velocity.x) * rate;
@@ -687,9 +711,50 @@ class SwarmfallGame {
       const damping = Math.pow(BALANCE.unitDamping, delta * 10);
       unit.velocity.x *= damping;
       unit.velocity.y *= damping;
+      if (Math.hypot(unit.velocity.x, unit.velocity.y) >= BALANCE.headingSpeedThreshold) {
+        unit.heading = Math.atan2(unit.velocity.y, unit.velocity.x);
+      }
       unit.position.x = clamp(unit.position.x + unit.velocity.x * delta, 12, this.state.width - 12);
       unit.position.y = clamp(unit.position.y + unit.velocity.y * delta, 12, this.state.height - 12);
     }
+  }
+
+  private idleDestination(unit: Unit, center: Point, mode: FormationMode, delta: number): Point {
+    const home = formationAnchor(center, unit.kind, mode, unit.index);
+    const patrolRadius = idlePatrolRadius(mode);
+    if (unit.idleTarget && distance(unit.idleTarget, home) > patrolRadius + BALANCE.idleWaypointReachRadius) {
+      unit.idleTarget = undefined;
+      unit.idlePause = 0;
+    }
+    if (unit.idleTarget && distance(unit.position, unit.idleTarget) > BALANCE.idleWaypointReachRadius) {
+      return unit.idleTarget;
+    }
+    if (unit.idleTarget) {
+      unit.idleTarget = undefined;
+      unit.idlePause = randomBetween(BALANCE.idlePauseMinSeconds, BALANCE.idlePauseMaxSeconds);
+    }
+    if (unit.idlePause > 0) {
+      unit.idlePause = Math.max(0, unit.idlePause - delta);
+      return unit.position;
+    }
+
+    const angle = Math.random() * TAU;
+    const radialDistance = Math.sqrt(Math.random()) * patrolRadius;
+    const candidate = {
+      x: home.x + Math.cos(angle) * radialDistance,
+      y: home.y + Math.sin(angle) * radialDistance,
+    };
+    const fromCenter = { x: candidate.x - center.x, y: candidate.y - center.y };
+    const fromCenterDistance = Math.hypot(fromCenter.x, fromCenter.y);
+    const maxActivityDistance = activityRadius(mode) - BALANCE.unitRadius;
+    if (fromCenterDistance > maxActivityDistance) {
+      candidate.x = center.x + (fromCenter.x / fromCenterDistance) * maxActivityDistance;
+      candidate.y = center.y + (fromCenter.y / fromCenterDistance) * maxActivityDistance;
+    }
+    candidate.x = clamp(candidate.x, BALANCE.unitRadius, this.state.width - BALANCE.unitRadius);
+    candidate.y = clamp(candidate.y, BALANCE.unitRadius, this.state.height - BALANCE.unitRadius);
+    unit.idleTarget = candidate;
+    return candidate;
   }
 
   private resolveCollisions(): void {
@@ -992,8 +1057,7 @@ class SwarmfallGame {
       const color = unit.kind === 'GUARD' ? '#ff815b' : '#61d7d7';
       context.save();
       context.translate(unit.position.x, unit.position.y);
-      const angle = Math.atan2(unit.velocity.y, unit.velocity.x);
-      context.rotate(angle);
+      context.rotate(unit.heading);
       context.fillStyle = unit.flash > 0 ? '#ffffff' : color;
       context.strokeStyle = '#07110f';
       context.lineWidth = 1.5;
