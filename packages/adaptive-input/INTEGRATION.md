@@ -1,76 +1,129 @@
 # Integrating a host game
 
-This is the contract for a future host integration. It has **not** been applied
-to Swarmfall yet. The team's canonical demo and action table must be agreed
-before game-specific wiring is merged.
+This is the current contract for adding the adaptive-input package to a game. Swarmfall is the
+reference integration:
+
+- Host action catalog: `demos/swarmfall/src/actionCatalog.ts`
+- Host adapter: `demos/swarmfall/src/adaptiveInput.ts`
+- Game action bus: `demos/swarmfall/src/actionBus.ts`
+- Platform touch adapter: `demos/swarmfall/src/input.ts`
+- Simulation listeners: `demos/swarmfall/src/main.ts`
+
+The package never imports any of those files. The dependency runs from host to middleware only.
 
 ## The three boundaries
 
 ```text
-platform input        host translation       game behaviour
-touch / gesture  ->   action + payload   ->  existing game listener
-       |                       |
-       +-> neutral signal      +-> AdaptiveInput records, gates, dispatches
+platform input          host translation          existing game behaviour
+touch / camera signal → action + typed payload → game action listener
+        │                       │
+        └→ neutral signal       └→ record, binding gate, dispatch
 ```
 
-- A channel reports an `InputSignal`: source, timestamp, and optional
-  confidence. It never imports a game or names a game action.
-- A host adapter translates that signal into one of the host's declared actions
-  and its typed payload.
-- `AdaptiveInput` records the attempt before checking whether that source is
-  currently bound. Only accepted attempts reach game logic.
+1. An input channel reports a neutral `InputSignal`: source, shape, timestamp and optional
+   confidence. It never names a game action.
+2. A host-owned adapter translates that signal into one of the host's declared actions and its
+   typed payload.
+3. `AdaptiveInput` records the attempt before checking the live binding. Accepted attempts reach
+   the game listener; rejected attempts remain available in telemetry.
 
-The layer never sends worker coordinates, chooses targets, reads live game
-state, or generates command sequences. Those are game responsibilities.
+The middleware never reads live game state, selects units, chooses targets, creates strategies or
+generates command sequences.
 
-## Declare original controls
+## 1. Declare the host's actions
 
-The host declares every action that passes through the layer. Original controls
-are installed immediately, so adopting the package does not remove working
-touch input.
+The payload map is owned by the game:
 
 ```ts
-interface HostActions {
-  BEGIN_ROUND: Record<string, never>;
-  RESTART_ROUND: Record<string, never>;
+interface GameActions {
+  GATHER_UNITS: Record<string, never>;
+  SPREAD_UNITS: Record<string, never>;
   TOGGLE_SQUAD: Record<string, never>;
+  DIRECT_UNITS: { direction: { x: number; y: number } | null };
 }
+```
 
-const adaptive = new AdaptiveInput<HostActions>();
+Register only actions that the adaptive layer may observe or remap:
+
+```ts
+const adaptive = new AdaptiveInput<GameActions>();
 
 adaptive.registerActions([
   {
-    id: 'BEGIN_ROUND',
+    id: 'GATHER_UNITS',
     requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
-    remappable: false,
+    remappable: true,
   },
   {
-    id: 'RESTART_ROUND',
-    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
-    defaultSource: InputSourceId.TOUCH_BUTTON,
-    remappable: false,
-  },
-  {
-    id: 'TOGGLE_SQUAD',
-    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
-    defaultSource: InputSourceId.TOUCH_BUTTON,
+    id: 'DIRECT_UNITS',
+    requirements: { task: 'DIRECTION', spatial: false, latencyCritical: true },
+    defaultSource: InputSourceId.TOUCH_DIRECTION,
     remappable: true,
   },
 ]);
 ```
 
-`TOGGLE_SQUAD` above is an integration example, not an instruction to add that
-exact action. The demo owner must provide the real action table first.
+Registration immediately installs the original source. Adopting the package therefore does not
+remove working touch input.
 
-`BEGIN_ROUND` and `RESTART_ROUND` remain fixed touch controls. Calling
-`adaptive.rebind()` for either throws instead of silently breaking the game's
-fallback. A game may explicitly declare another action remappable when it wants
-to offer that choice.
+`requirements.task` selects the compatible calibration shape:
 
-## Translate without coupling the channel to the game
+- `TRIGGER`: one-shot actions such as a button press or closed fist
+- `DIRECTION`: a held relative direction such as a joystick or hand pointing
+- `POINT`: an absolute normalized position; designed in the contract but not used by Swarmfall
 
-The vision implementation emits only a neutral signal:
+`spatial` and `latencyCritical` are host metadata seams. The current recommender does not apply
+automatic weighting from those two flags; it compares the measured metrics and leaves visible
+trade-offs to the player.
+
+Keep fixed actions outside the remappable catalog, or register them with `remappable: false`.
+Swarmfall keeps Begin and Restart on its original touch/click path.
+
+## 2. Describe available input sources
+
+`BindingSettingsController` needs game-independent source metadata:
+
+```ts
+const sources: readonly InputSourceDefinition[] = [
+  {
+    id: InputSourceId.TOUCH_BUTTON,
+    label: 'Touch button',
+    tasks: ['TRIGGER'],
+    scope: 'TARGETED',
+    requiresCamera: false,
+  },
+  {
+    id: InputSourceId.HAND_CLOSED_FIST,
+    label: 'Closed fist',
+    tasks: ['TRIGGER'],
+    scope: 'GLOBAL',
+    requiresCamera: true,
+  },
+  {
+    id: InputSourceId.TOUCH_DIRECTION,
+    label: 'Touch direction',
+    tasks: ['DIRECTION'],
+    scope: 'TARGETED',
+    requiresCamera: false,
+  },
+  {
+    id: InputSourceId.HAND_POINT_DIRECTION,
+    label: 'Hand pointing',
+    tasks: ['DIRECTION'],
+    scope: 'GLOBAL',
+    requiresCamera: true,
+  },
+];
+```
+
+A targeted source belongs to the control the player touched. A global source, such as a camera
+gesture, does not identify a button by itself. The settings controller therefore checks that one
+global source is not assigned to several actions in the same host context.
+
+## 3. Translate neutral signals
+
+The vision channel emits neutral input:
 
 ```ts
 context.emit({
@@ -81,81 +134,133 @@ context.emit({
 });
 ```
 
-`task` describes only the neutral input shape: `TRIGGER`, `DIRECTION`, or `POINT`. Calibration
-scores are stored by task and input source, so one recent touch-trigger score can support several
-button-like actions without teaching the middleware what those actions mean in the game.
-
-The host-owned adapter supplies the action and payload:
+The host adapter supplies game meaning:
 
 ```ts
 function handleSignal(signal: InputSignal): void {
-  if (signal.source === InputSourceId.HAND_CLOSED_FIST) {
-    adaptive.emitFrom('TOGGLE_SQUAD', {}, signal);
+  if (signal.source === InputSourceId.HAND_CLOSED_FIST && signal.kind === 'trigger') {
+    adaptive.emitFrom('GATHER_UNITS', {}, signal);
   }
 }
 ```
 
-The adapter may report candidate attempts from both touch and gesture. The
-binding gate decides which one dispatches, while telemetry retains both.
-Changing the accepted source is one checked call:
+The same rule applies to direction:
 
 ```ts
-adaptive.rebind('TOGGLE_SQUAD', InputSourceId.HAND_CLOSED_FIST);
+if (signal.source === InputSourceId.HAND_POINT_DIRECTION && signal.kind === 'direction') {
+  adaptive.emitFrom('DIRECT_UNITS', { direction: signal.direction }, signal);
+}
+
+if (signal.source === InputSourceId.HAND_POINT_DIRECTION && signal.kind === 'direction-end') {
+  adaptive.emitFrom('DIRECT_UNITS', { direction: null }, signal);
+}
 ```
 
-One source may legitimately back several actions. For example,
-`TOUCH_BUTTON` can remain the default for Begin, Restart, and menu commands.
-Never implement a global "one source may appear only once" rule.
+A direction-ended signal is mandatory for continuous controls. It prevents movement from
+remaining active when the hand disappears, stops pointing or changes to another gesture.
 
-Directional pointing is also a neutral signal:
+Touch adapters report attempts through the same `AdaptiveInput.emit()` boundary. Do not bypass
+the binding gate by calling game behaviour directly.
 
-```ts
-context.emit({
-  source: InputSourceId.HAND_POINT_DIRECTION,
-  kind: 'direction',
-  direction: { x: 0.8, y: -0.2 },
-  timestamp: performance.now(),
-  confidence: 0.88,
-});
-```
-
-This does not move a game unit by itself. A host may translate it to a declared
-relative-movement action only when the game already implements that action and
-offers an equivalent touch source such as `TOUCH_DIRECTION`. Otherwise the
-gesture would add a new capability instead of adapting an existing control.
-
-## Forward actions explicitly
-
-Use typed listeners rather than a loop containing `as never` casts:
+## 4. Forward accepted actions to the game
 
 ```ts
-adaptive.on('BEGIN_ROUND', (payload) => gameBus.emit('BEGIN_ROUND', payload));
-adaptive.on('RESTART_ROUND', (payload) => gameBus.emit('RESTART_ROUND', payload));
+adaptive.on('GATHER_UNITS', (payload) => gameBus.emit('GATHER_UNITS', payload));
+adaptive.on('SPREAD_UNITS', (payload) => gameBus.emit('SPREAD_UNITS', payload));
 adaptive.on('TOGGLE_SQUAD', (payload) => gameBus.emit('TOGGLE_SQUAD', payload));
+adaptive.on('DIRECT_UNITS', (payload) => gameBus.emit('DIRECT_UNITS', payload));
 ```
 
-This is repetitive by a few lines, but action names and payload mistakes are
-caught by TypeScript.
+Use explicit typed listeners. They are repetitive by a few lines, but TypeScript catches action
+names and payload mistakes.
 
-## Channel lifecycle
+## 5. Render binding settings
 
-Register platform channels with `ChannelManager`. After a binding change,
-reconcile it with `adaptive.bindings.activeChannels()`:
+The package supplies `BindingSettingsController`, not a universal game UI. The host may render
+its state using web, native Android/iOS, Unity or another toolkit.
+
+The intended host flow is:
+
+```text
+Choose action
+→ Choose compatible alternative
+→ Use saved measurements or test again
+→ Review the side-by-side result
+→ Use alternative or keep original
+```
+
+Calling `preview()` never changes the live binding. The host calls `confirm()` only after the
+player approves the measured alternative. If the player explicitly skips testing, the host may
+call `confirmWithoutCalibration()`. `reset()` restores the game's declared default source.
+
+Swarmfall opens its web calibration route and returns to the selected binding review. That route
+change is a reference-host choice, not a middleware requirement. A mobile host can pause its game,
+open a native calibration screen and resume its own scene afterward.
+
+## 6. Calibrate and remember measurements
+
+The package provides:
+
+- `CalibrationHarness` and `scoreCalibration()` for trigger inputs
+- `DirectionCalibrationHarness` and `scoreDirectionCalibration()` for relative direction
+- `CalibrationProfile` and `CalibrationProfileStore` for derived measurements
+- `ControlRecommender` for side-by-side comparison
+
+Profiles are keyed by neutral task and source, such as
+`TRIGGER:HAND_CLOSED_FIST`. They are not keyed by Swarmfall action names. Another host on the same
+web origin can therefore reuse a compatible measurement, while still allowing the player to
+retest.
+
+Swarmfall's trigger UI offers a 6-prompt Quick Test and a 12-prompt Full Test. Both currently save
+to the same profile slot, so saving a Quick Test replaces the previous result. The UI warns the
+player. The full test is the intended comparison; the quick mode is a preview for development and
+short demonstrations.
+
+## 7. Manage camera lifecycle
+
+Register platform channels with `ChannelManager`. After a binding changes, reconcile against
+`adaptive.bindings.activeChannels()`:
 
 ```ts
 await channels.reconcile(adaptive.bindings.activeChannels());
 ```
 
-The manager serializes changes, starts only required channels, stops unused
-ones, and reports failures. Camera denial must leave the fixed touch controls
-playable.
+The manager serializes lifecycle changes, avoids duplicate starts and stops unused channels.
+Camera denial or model failure must report an unavailable/error state while leaving touch usable.
+Stopping vision must release the media stream and processing loop.
+
+The camera preview is useful during calibration and gesture training. It does not need to cover
+the game during normal play.
+
+## 8. Persist host bindings separately
+
+The reusable calibration profile remembers how the player performed by task and source. The host
+remains responsible for persisting its own action-to-source bindings because action names belong
+to that game.
+
+Validate persisted values before applying them. If a source is unavailable or no longer supported,
+restore the declared touch default.
+
+## Integration checklist
+
+- The package does not import the host.
+- Simulation code does not read pointer, touch or camera APIs.
+- Every original touch capability remains available.
+- Neutral channels never name host actions.
+- Telemetry records before the binding check.
+- Only the bound source dispatches.
+- Continuous direction always has an explicit end.
+- Previewing a binding does not mutate it.
+- The player explicitly confirms or skips testing before a change.
+- Camera failure leaves touch playable.
+- Repeated channel start/stop is safe.
+- `npm run build` passes with strict TypeScript.
 
 ## Deliberately deferred
 
-- Swarmfall integration, until the team chooses its canonical demo.
-- Vision prototype adaptation, until its source is reviewed.
-- Natural-language or LLM mapping.
-- Strategy generation.
-- Button layout, touch offset, drift, and directional-bias adaptation.
-- A continuous `LASSO_POINT` storage policy. Until aggregation is implemented,
-  do not use high-frequency point records as recommendation evidence.
+- Natural-language or LLM mapping
+- Generated strategy or macro behaviour
+- Button placement, size or offset modification
+- Face, tilt, sound and custom-trained gesture channels
+- Cross-site account/profile synchronization
+- Automatic conclusions about disability, fatigue or medical condition

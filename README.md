@@ -2,122 +2,158 @@
 
 **Garena AI Build Challenge 2026 — Reimagine Digital Entertainment Experiences**
 
-Mobile games let players move and resize buttons, but the player still has to adapt to the
-touchscreen. Players differ in hand size, motor ability, grip, fatigue, reach and reaction time.
-Input channels differ too — touch is fast but hard to reach, a gesture is slower but steadier,
-face movement works when both hands are occupied.
+Mobile games usually let players move or resize controls, but the player still has to adapt to
+the available input. This project is game-agnostic middleware that lets an integrating game offer
+touch and on-device hand input through one typed boundary.
 
-This project is a **game-agnostic middleware layer** that does two things.
+For each player, the layer can:
 
-### 1. It provides the input channels
+1. Measure compatible input sources with the same prompted task.
+2. Compare success, reaction latency and false activations.
+3. Explain whether one input measured better or whether the result is a trade-off.
+4. Apply a new binding only after the player approves it.
+5. Keep the game's original touch control available as the safe default.
 
-Touch controls and on-device hand gesture recognition, behind one uniform interface. **A game
-adopting the layer gets alternative controls without implementing any of them.** No camera
-pipeline to build, no model to integrate, no per-channel plumbing.
+MediaPipe gesture recognition runs in the browser. Raw camera frames are not uploaded or stored.
+The current MVP uses transparent comparison rules rather than an LLM.
 
-The same `InputChannel` interface is designed to take further channels — face blendshapes,
-device tilt, sound. Those are designed, not delivered.
+## Live demo
 
-### 2. It assigns them to actions, per player
+[Play Swarmfall](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site)
 
-1. **Measures** how reliably this individual player uses each available channel.
-2. **Compares** those measurements against each game action's declared requirements.
-3. **Recommends** which action should move to which channel.
-4. **Explains** the recommendation in plain language.
-5. **Validates** whether the new configuration actually improved performance.
+Swarmfall is the reference host, not the product. Its remappable actions are Gather, Spread,
+Switch squad and Direct units. Touch provides every original action; closed fist, open palm,
+thumbs up and hand-point direction are compatible alternatives.
 
-> **Declared action requirements × measured input capabilities → assignment, with an explanation.**
+The calibration page offers:
 
-The layer knows nothing about any particular game. Games declare their actions and requirements;
-the layer supplies the channels and handles measurement, recommendation and rebinding.
+- **Quick Test — 6 prompts:** a preview for development and short demonstrations.
+- **Full Test — 12 prompts:** the intended trigger-input comparison.
+- **Direction Test — 8 prompts:** compares touch direction with hand pointing.
 
----
+Quick and Full trigger tests currently save to the same task-and-source profile slot. Running a
+Quick Test after a Full Test replaces that saved result; the UI states this explicitly.
+
+## Run locally
+
+Requirements:
+
+- Node.js 22 or newer
+- npm
+- A camera for visual input; touch remains usable without one
+
+```powershell
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000/`. Browsers treat localhost as a secure context, so camera access can
+work there. A phone cannot normally use the laptop's plain-HTTP LAN address for camera testing;
+use the public HTTPS demo instead.
+
+Verify a production build:
+
+```powershell
+npm run build
+npm run start
+```
 
 ## Repository layout
 
 ```text
 packages/
-└── adaptive-input/     the product — input abstraction, telemetry,
-                        calibration, recommendation engine
+└── adaptive-input/     reusable middleware: actions, bindings, channels,
+                        telemetry, calibration, profiles and recommendation
 
 demos/
-└── swarmfall/          real-time swarm control game
+└── swarmfall/          reference host game and host-owned adapter/UI
+
+app/
+├── page.tsx            Swarmfall web route
+└── calibration/        web calibration screen used by the reference host
 ```
 
-**Rule:** `packages/adaptive-input/` must never import from `demos/`. The dependency runs one
-way only. That constraint is what makes the portability claim verifiable rather than asserted.
+`packages/adaptive-input/` never imports from `demos/`. A host imports the layer and translates
+neutral input signals into its own typed game actions.
 
----
-
-## Integration surface
-
-What a game developer writes to adopt the layer:
+## Integration at a glance
 
 ```ts
-// Turn on the channels this game wants available.
-// Touch controls, gesture recognition and the camera pipeline all come from the layer.
-adaptive.enableChannels(['TOUCH', 'HAND_VISION']);
+interface GameActions {
+  GATHER_UNITS: Record<string, never>;
+  DIRECT_UNITS: { direction: { x: number; y: number } | null };
+}
 
-// Declare what each action needs. The layer works out the rest.
+const adaptive = new AdaptiveInput<GameActions>();
+
 adaptive.registerActions([
-  { id: 'MOVE',   requirements: { task: 'DIRECTION', spatial: true,  latencyCritical: false } },
-  { id: 'RECALL', requirements: { task: 'TRIGGER',   spatial: false, latencyCritical: false } },
-  { id: 'HOLD',   requirements: { task: 'TRIGGER',   spatial: false, latencyCritical: false } },
+  {
+    id: 'GATHER_UNITS',
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
+    defaultSource: InputSourceId.TOUCH_BUTTON,
+    remappable: true,
+  },
+  {
+    id: 'DIRECT_UNITS',
+    requirements: { task: 'DIRECTION', spatial: false, latencyCritical: true },
+    defaultSource: InputSourceId.TOUCH_DIRECTION,
+    remappable: true,
+  },
 ]);
 
-adaptive.on('RECALL', () => swarm.recall());
+adaptive.on('GATHER_UNITS', () => game.gatherSelectedUnits());
+adaptive.on('DIRECT_UNITS', ({ direction }) => game.directSelectedUnits(direction));
 ```
 
-That is the entire integration. The game never touches a pointer event, a hand landmark or a
-camera stream — and calibration, measurement, recommendation and rebinding are all handled by
-the layer.
+Input channels emit neutral signals containing a source, timestamp, input shape and optional
+confidence. A host adapter chooses the matching game action and payload. `BindingMap` then decides
+whether that source may dispatch the action, while telemetry records both accepted and rejected
+attempts.
 
----
-
-## Setup
-
-> **TODO** — complete before submission. Must allow a reviewer to run the prototype from a
-> clean checkout.
-
-**Requirements**
-
-- Node.js 22+
-- A device with a camera, for gesture input
-- HTTPS (camera access requires a secure context — see Deployment)
-
-**Install**
-
-```bash
-# TODO
-```
-
-**Run a demo**
-
-```bash
-# TODO
-```
-
-**Deployment**
-
-Camera access requires a secure context. Local development over `http://localhost` works;
-LAN access over plain HTTP does not. For device testing, use the deployed HTTPS URL.
-
-- Live demo: **TODO**
-
----
+See [packages/adaptive-input/INTEGRATION.md](packages/adaptive-input/INTEGRATION.md) for the complete
+host contract.
 
 ## Documentation
 
-| Document | Contents |
+Read these in this order:
+
+| Document | Purpose |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, data flow, key interfaces |
-| [DISCLOSURE.md](DISCLOSURE.md) | Third-party libraries, models, datasets and APIs |
-| [PLAN.md](PLAN.md) | Implementation plan and decision log |
+| [STATUS.md](STATUS.md) | Current implementation, ownership, known gaps and handoff state |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current system boundaries and data flow |
+| [PLAN.md](PLAN.md) | Initial planning baseline plus a record of what changed |
+| [DISCLOSURE.md](DISCLOSURE.md) | Libraries, models, runtime downloads and external services |
+| [CONSIDERATIONS.md](CONSIDERATIONS.md) | Assumptions and design questions; some entries are historical |
 
----
+When a historical PLAN statement conflicts with STATUS, ARCHITECTURE or the code, the current
+documents and code win.
 
-## Privacy
+## Current scope
 
-Alternative-input recognition runs entirely **on-device**. Raw camera frames are never
-transmitted, stored, or sent to any server. Only derived metrics — success rates, latencies,
-confidence scores — are retained, and only in browser local storage.
+Shipped:
+
+- Touch trigger and directional sources
+- On-device closed fist, open palm, thumbs up and hand-point direction
+- Typed action registration and runtime binding gate
+- Pre-gate telemetry
+- Trigger and direction calibration
+- Saved player profile, side-by-side comparison and explicit binding approval
+- Camera failure fallback to touch
+
+Deferred:
+
+- Face, tilt, sound and custom-trained gesture channels
+- Natural-language mapping and LLM integration
+- Generated strategies, macros and executable behaviour
+- Automatic button-layout modification
+- Cross-site account/profile synchronisation
+
+## Privacy and limitations
+
+Camera processing stays on the player's device. The browser stores derived calibration scores and
+bindings in local storage. The MediaPipe WebAssembly runtime and published gesture model are
+downloaded from the pinned URLs listed in [DISCLOSURE.md](DISCLOSURE.md).
+
+Saved measurements describe one device and testing context. Lighting, grip, camera angle or the
+player's condition may later change, so the player can retest instead of treating an old result as
+permanent truth.

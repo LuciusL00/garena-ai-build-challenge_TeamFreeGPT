@@ -1,10 +1,30 @@
-# Adaptive Input Layer — Implementation Plan v8
+# Adaptive Input Layer — Initial Plan and Decision Record
 
 **Garena AI Build Challenge 2026**
 
-> The specification. For current progress, milestones and work split see [STATUS.md](STATUS.md).
-> v8 keeps T0 on one discrete touch-button ↔ closed-fist mapping. Swarmfall now exposes native
-> directional squad control as a later mapping seam; pointing and directional calibration are T1.
+> **Historical planning baseline.** Most of this document preserves the team's 30 July–3 August
+> plan so reviewers can see the assumptions, priorities and genuine changes made during
+> implementation. It is not a current coding instruction. For current truth, read
+> [STATUS.md](STATUS.md), [ARCHITECTURE.md](ARCHITECTURE.md) and the implementation. Do not add an
+> old PLAN feature unless it also appears as current or pending work in STATUS.
+
+## Current implementation delta — 6 August
+
+| Initial plan or assumption | Current result | Why it changed |
+|---|---|---|
+| T0 demonstrates one touch-button ↔ closed-fist mapping | The reference host supports Gather ↔ closed fist, Spread ↔ open palm, Switch squad ↔ thumbs up, and Direct units ↔ hand-point direction | The integrated vision channel reliably exposed several allowlisted signals, while the binding layer remained game-blind |
+| Lasso or a strategy command provides the main remapping example | Swarmfall uses a touch joystick and equivalent relative pointing direction, plus existing Gather, Spread and Switch commands | This demonstrates input adaptation without adding macros, generated behaviour or a gameplay advantage |
+| Lucius's host is temporary while Mark supplies a canonical demo | Mark confirmed the integrated host has equivalent controls, so it is now the candidate team demo pending formal review | Continuing from the working host reduced duplicated game work |
+| Calibration is a single fixed run | Trigger calibration offers a 6-prompt Quick Test and a 12-prompt Full Test; direction calibration uses 8 prompts | Quick Test keeps debugging and presentations short; Full Test is the intended trigger comparison |
+| A separate before/after rerun and gameplay-latency HUD are required | Calibration provides the measured comparison; gameplay shows detected input, confidence and mapped action | The team chose visible evidence without forcing an unnecessary second calibration run |
+| Accepting an alternative requires calibration | The player may test and review results or explicitly use an alternative without testing | The layer advises but does not block the player's control choice |
+| T1 pointing and additional mappings are optional future polish | Point direction, direction-ended handling, direction calibration and three visual trigger mappings are integrated | These became available early enough to include without changing the middleware boundary |
+| Natural-language strategy generation may follow T0 | LLM strategy generation remains deferred | It does not strengthen the adaptive-control MVP and risks looking like macro automation |
+| Temporary review tunnel is the delivery route | A public Sites deployment is available at [swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site) | The demo needs a stable HTTPS origin for mobile camera access |
+
+The original plan below remains intentionally unchanged where it records superseded assumptions.
+Its dates, tier labels, temporary action names and proposed acceptance flow are evidence of the
+planning process, not a description of the final build.
 
 ---
 

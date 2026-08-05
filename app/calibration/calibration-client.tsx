@@ -459,19 +459,27 @@ export default function CalibrationClient() {
             <span>{progress}</span>
           </div>
           {selection.task === 'TRIGGER' && (
-            <div className="mode-row" aria-label="Calibration length">
-              {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
-                <button
-                  data-calibration-control
-                  className={testMode === mode ? 'selected' : ''}
-                  disabled={activeTest !== null}
-                  key={mode}
-                  onClick={() => chooseMode(mode)}
-                >
-                  {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="mode-row" aria-label="Calibration length">
+                {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
+                  <button
+                    data-calibration-control
+                    className={testMode === mode ? 'selected' : ''}
+                    disabled={activeTest !== null}
+                    key={mode}
+                    onClick={() => chooseMode(mode)}
+                  >
+                    {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
+                  </button>
+                ))}
+              </div>
+              {testMode === 'quick' && (
+                <p>
+                  Quick Test is a preview only. Saving it replaces the previous result, including
+                  a Full Test.
+                </p>
+              )}
+            </>
           )}
           <div className={`test-cue ${activeTest ? 'active' : ''}`}>{cue}</div>
           <p>{testDetail}</p>
