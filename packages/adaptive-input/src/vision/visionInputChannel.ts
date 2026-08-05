@@ -1,7 +1,6 @@
 import { FilesetResolver, GestureRecognizer } from '@mediapipe/tasks-vision';
 import { ChannelUnavailableError, type ChannelContext, type InputChannel } from '../channel.ts';
 import { InputChannelId, InputSourceId } from '../sources.ts';
-import { ClosedFistGate, type ClosedFistGateState } from './closedFistGate.ts';
 import { GestureCommandGate, type GestureCommandGateState } from './gestureCommandGate.ts';
 import { PointDirectionTracker, type DirectionVector } from './pointDirection.ts';
 
@@ -13,7 +12,7 @@ export const GESTURE_RECOGNIZER_MODEL_URL =
 
 export type VisionStatus = 'IDLE' | 'REQUESTING' | 'LOADING' | 'READY' | 'ERROR';
 export interface VisionDiagnostic {
-  readonly fistState: ClosedFistGateState;
+  readonly fistState: GestureCommandGateState;
   readonly fistConfidence: number;
   readonly direction: DirectionVector | null;
   readonly commandState: GestureCommandGateState;
@@ -25,6 +24,12 @@ export interface VisionInputChannelOptions {
   readonly onStatus?: (status: VisionStatus, detail: string) => void;
   readonly onDiagnostic?: (diagnostic: VisionDiagnostic) => void;
 }
+
+const TRIGGER_DEFINITIONS = [
+  { categoryName: 'Closed_Fist', source: InputSourceId.HAND_CLOSED_FIST },
+  { categoryName: 'Open_Palm', source: InputSourceId.HAND_OPEN_PALM },
+  { categoryName: 'Thumb_Up', source: InputSourceId.HAND_THUMB_UP },
+] as const;
 
 export class VisionInputChannel implements InputChannel {
   readonly id = InputChannelId.HAND_VISION;
@@ -43,13 +48,19 @@ export class VisionInputChannel implements InputChannel {
   private startPromise: Promise<void> | null = null;
   private generation = 0;
   private readonly point = new PointDirectionTracker();
-  private readonly fist = new ClosedFistGate(({ timestamp, confidence }) => {
-    void timestamp;
-    void confidence;
-  });
-  private readonly commands = new GestureCommandGate((candidate, timestamp) => {
-    this.context?.emit({ kind: 'trigger', source: candidate.source, timestamp, confidence: candidate.confidence });
-  });
+  private readonly triggerGates = new Map<InputSourceId, GestureCommandGate>(
+    TRIGGER_DEFINITIONS.map((definition) => [
+      definition.source,
+      new GestureCommandGate((candidate, timestamp) => {
+        this.context?.emit({
+          kind: 'trigger',
+          source: candidate.source,
+          timestamp,
+          confidence: candidate.confidence,
+        });
+      }),
+    ] as const),
+  );
 
   constructor(
     private readonly video: HTMLVideoElement,
@@ -63,8 +74,7 @@ export class VisionInputChannel implements InputChannel {
   start(ctx: ChannelContext): Promise<void> {
     if (this.isActive) {
       if (this.pointing) this.emitPointingEnd(performance.now());
-      this.fist.reset();
-      this.commands.reset();
+      this.resetTriggerGates();
       this.point.reset();
       this.context = ctx;
       return Promise.resolve();
@@ -90,8 +100,7 @@ export class VisionInputChannel implements InputChannel {
     this.context = null;
     this.processing = false;
     this.pointing = false;
-    this.fist.reset();
-    this.commands.reset();
+    this.resetTriggerGates();
     this.point.reset();
     this.report('IDLE', 'Camera stopped. Touch controls remain available.');
   }
@@ -151,22 +160,33 @@ export class VisionInputChannel implements InputChannel {
     try {
       const timestamp = performance.now();
       const result = this.recognizer.recognizeForVideo(this.video, timestamp);
-      const fistConfidence = result.gestures[0]?.find((item) => item.categoryName === 'Closed_Fist')?.score ?? 0;
-      this.fist.update({ timestamp, confidence: fistConfidence });
-      const detectedCommand = commandCandidate(result.gestures[0] ?? []);
-      this.commands.update(timestamp, detectedCommand);
+      const gestures = result.gestures[0] ?? [];
+      const candidates = triggerCandidates(gestures);
+      TRIGGER_DEFINITIONS.forEach(({ source }) => {
+        this.triggerGates.get(source)?.update(
+          timestamp,
+          candidates.find((candidate) => candidate.source === source) ?? null,
+        );
+      });
+      const detectedCommand = highestConfidence(candidates);
       const direction = result.landmarks[0] ? this.point.update(result.landmarks[0]) : null;
-      if (direction && this.commands.state === 'READY') {
+      if (direction) {
         this.pointing = true;
         this.context?.emit({ kind: 'direction', source: InputSourceId.HAND_POINT_DIRECTION, timestamp, direction });
       } else if (this.pointing) {
         this.emitPointingEnd(timestamp);
       }
+      const fistConfidence = confidenceFor(candidates, InputSourceId.HAND_CLOSED_FIST);
+      const commandState = detectedCommand
+        ? this.triggerGates.get(detectedCommand.source)?.state ?? 'READY'
+        : [...this.triggerGates.values()].some((gate) => gate.state === 'LOCKED')
+          ? 'LOCKED'
+          : 'READY';
       this.options.onDiagnostic?.({
-        fistState: this.fist.state,
+        fistState: this.triggerGates.get(InputSourceId.HAND_CLOSED_FIST)?.state ?? 'READY',
         fistConfidence,
         direction,
-        commandState: this.commands.state,
+        commandState,
         detectedCommand: detectedCommand?.source ?? null,
         commandConfidence: detectedCommand?.confidence ?? 0,
       });
@@ -195,9 +215,12 @@ export class VisionInputChannel implements InputChannel {
     this.recognizer = null;
     this.context = null;
     this.pointing = false;
-    this.fist.reset();
-    this.commands.reset();
+    this.resetTriggerGates();
     this.point.reset();
+  }
+
+  private resetTriggerGates(): void {
+    this.triggerGates.forEach((gate) => gate.reset());
   }
 
   private report(status: VisionStatus, detail: string): void {
@@ -205,19 +228,26 @@ export class VisionInputChannel implements InputChannel {
   }
 }
 
-function commandCandidate(
+function triggerCandidates(
   gestures: readonly { readonly categoryName: string; readonly score: number }[],
-): { source: InputSourceId; confidence: number } | null {
-  const definitions = [
-    ['Closed_Fist', InputSourceId.HAND_CLOSED_FIST],
-    ['Open_Palm', InputSourceId.HAND_OPEN_PALM],
-    ['Thumb_Up', InputSourceId.HAND_THUMB_UP],
-  ] as const;
-  const candidates = definitions.flatMap(([categoryName, source]) => {
+): readonly { source: InputSourceId; confidence: number }[] {
+  return TRIGGER_DEFINITIONS.flatMap(({ categoryName, source }) => {
     const match = gestures.find((gesture) => gesture.categoryName === categoryName);
     return match ? [{ source, confidence: match.score }] : [];
   });
-  return candidates.sort((left, right) => right.confidence - left.confidence)[0] ?? null;
+}
+
+function highestConfidence(
+  candidates: readonly { source: InputSourceId; confidence: number }[],
+): { source: InputSourceId; confidence: number } | null {
+  return [...candidates].sort((left, right) => right.confidence - left.confidence)[0] ?? null;
+}
+
+function confidenceFor(
+  candidates: readonly { source: InputSourceId; confidence: number }[],
+  source: InputSourceId,
+): number {
+  return candidates.find((candidate) => candidate.source === source)?.confidence ?? 0;
 }
 
 function errorMessage(error: unknown): string {

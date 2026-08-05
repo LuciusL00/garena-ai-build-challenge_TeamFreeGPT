@@ -9,6 +9,7 @@ import {
   type BindingActionView,
   type BindingChangePreview,
   type BindingSourceView,
+  type CalibrationTask,
   type DirectionInputSignal,
   type InputSignal,
   type InputSourceDefinition,
@@ -55,7 +56,12 @@ export interface SwarmfallBindingSettingsView {
   controlScheme: 'TOUCH' | 'GESTURE' | 'CUSTOM';
 }
 
-export interface CalibrationRequest { action: GameAction; source: InputSourceId }
+export interface CalibrationRequest {
+  action: GameAction;
+  task: CalibrationTask;
+  currentSource: InputSourceId;
+  alternativeSource: InputSourceId;
+}
 
 export interface SwarmfallAdaptiveCallbacks {
   onAttempt(feedback: AdaptiveAttemptFeedback): void;
@@ -169,7 +175,15 @@ export class SwarmfallAdaptiveInput {
 
   reviewSelectedBinding(): void { this.stage = 'REVIEW'; this.refreshSettings(); }
   startSelectedCalibration(): void {
-    if (this.selectedSource !== null) this.callbacks.onCalibrationRequested({ action: this.selectedAction, source: this.selectedSource });
+    const preview = this.currentPreview();
+    const action = SWARMFALL_ACTION_CATALOG.find((candidate) => candidate.id === this.selectedAction);
+    if (!preview || !action) return;
+    this.callbacks.onCalibrationRequested({
+      action: this.selectedAction,
+      task: action.requirements.task,
+      currentSource: preview.from,
+      alternativeSource: preview.to,
+    });
   }
   keepCurrentBinding(): void { this.selectedSource = null; this.stage = 'CHOOSE'; this.refreshSettings(); this.closeSettings(); }
 

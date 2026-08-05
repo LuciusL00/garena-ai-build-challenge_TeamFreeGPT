@@ -7,6 +7,7 @@ export interface GestureCommandCandidate {
 
 export interface GestureCommandGateConfig {
   readonly enterConfidence: number;
+  readonly exitConfidence: number;
   readonly stabilityMs: number;
   readonly cooldownMs: number;
   readonly neutralMs: number;
@@ -14,6 +15,7 @@ export interface GestureCommandGateConfig {
 
 export const DEFAULT_GESTURE_COMMAND_CONFIG: GestureCommandGateConfig = {
   enterConfidence: 0.75,
+  exitConfidence: 0.45,
   stabilityMs: 200,
   cooldownMs: 450,
   neutralMs: 150,
@@ -21,7 +23,12 @@ export const DEFAULT_GESTURE_COMMAND_CONFIG: GestureCommandGateConfig = {
 
 export type GestureCommandGateState = 'READY' | 'CANDIDATE' | 'LOCKED';
 
-/** Arbitrates mutually-exclusive one-shot hand commands and requires neutral re-arming. */
+/**
+ * Gates one independent, game-blind trigger source.
+ *
+ * Create one instance per detector. A gate never knows which other gestures
+ * exist, so one source's cooldown cannot suppress another source.
+ */
 export class GestureCommandGate {
   private stateValue: GestureCommandGateState = 'READY';
   private candidate: GestureCommandCandidate | null = null;
@@ -32,7 +39,14 @@ export class GestureCommandGate {
   constructor(
     private readonly onActivation: (candidate: GestureCommandCandidate, timestamp: number) => void,
     private readonly config: GestureCommandGateConfig = DEFAULT_GESTURE_COMMAND_CONFIG,
-  ) {}
+  ) {
+    if (config.exitConfidence >= config.enterConfidence) {
+      throw new Error('exitConfidence must be lower than enterConfidence.');
+    }
+    if (config.stabilityMs < 0 || config.cooldownMs < 0 || config.neutralMs < 0) {
+      throw new Error('Gesture timing windows cannot be negative.');
+    }
+  }
 
   get state(): GestureCommandGateState {
     return this.stateValue;
@@ -44,7 +58,7 @@ export class GestureCommandGate {
       : null;
 
     if (this.stateValue === 'LOCKED') {
-      if (recognized) {
+      if (candidate && candidate.confidence > this.config.exitConfidence) {
         this.neutralSince = null;
         return;
       }

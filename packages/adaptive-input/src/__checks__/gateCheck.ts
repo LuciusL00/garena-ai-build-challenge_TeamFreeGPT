@@ -449,18 +449,36 @@ async function main(): Promise<void> {
   settings.reset('TOGGLE_SQUAD');
   check('reset restores the host default', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.TOUCH_BUTTON);
 
-  console.log('\nGesture command arbitration');
+  console.log('\nIndependent gesture trigger gates');
   const gestureActivations: InputSourceId[] = [];
-  const gestureGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
-  gestureGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  gestureGate.update(210, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
-  gestureGate.update(700, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
-  check('closed fist fires exactly once while another pose follows', gestureActivations.length === 1);
-  gestureGate.update(710, null);
-  gestureGate.update(870, null);
-  gestureGate.update(900, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
-  gestureGate.update(1_110, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
-  check('neutral re-arm permits the next deliberate command', gestureActivations[1] === InputSourceId.HAND_OPEN_PALM);
+  const fistGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
+  const palmGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
+  const thumbGate = new GestureCommandGate((candidate) => gestureActivations.push(candidate.source));
+  fistGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  fistGate.update(210, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  fistGate.update(500, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  check('closed fist fires once while held', gestureActivations.length === 1);
+  palmGate.update(220, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  palmGate.update(430, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  check(
+    'open palm can fire while the independent fist gate remains locked',
+    gestureActivations[1] === InputSourceId.HAND_OPEN_PALM,
+  );
+  thumbGate.update(440, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
+  thumbGate.update(650, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
+  thumbGate.update(900, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.9 });
+  check(
+    'thumbs up is independent and fires once while held',
+    gestureActivations[2] === InputSourceId.HAND_THUMB_UP && gestureActivations.length === 3,
+  );
+  fistGate.update(700, null);
+  fistGate.update(860, null);
+  fistGate.update(900, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  fistGate.update(1_110, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  check(
+    'neutral re-arm permits only that detector to fire again',
+    gestureActivations[3] === InputSourceId.HAND_CLOSED_FIST,
+  );
 
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);

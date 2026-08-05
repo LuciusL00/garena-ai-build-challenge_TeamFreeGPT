@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   CalibrationHarness,
   CalibrationProfile,
@@ -14,6 +20,7 @@ import {
   compareChannelScores,
   scoreCalibration,
   scoreDirectionCalibration,
+  type CalibrationTask,
   type ChannelScore,
   type DirectionCue,
   type InputSignal,
@@ -35,64 +42,89 @@ const TEST_CONFIGS = {
     responseTimeoutMs: 2_500,
   },
 } as const;
-const TEST_ACTION = 'DEMO_TRIGGER';
 
-type TriggerTestSource = 'touch' | 'fist';
-type TestSource = TriggerTestSource | 'pointing';
+const TRIGGER_SOURCES = [
+  InputSourceId.TOUCH_BUTTON,
+  InputSourceId.HAND_CLOSED_FIST,
+  InputSourceId.HAND_OPEN_PALM,
+  InputSourceId.HAND_THUMB_UP,
+] as const;
+const DIRECTION_SOURCES = [
+  InputSourceId.TOUCH_DIRECTION,
+  InputSourceId.HAND_POINT_DIRECTION,
+] as const;
+const VISION_SOURCES = new Set<InputSourceId>([
+  InputSourceId.HAND_CLOSED_FIST,
+  InputSourceId.HAND_OPEN_PALM,
+  InputSourceId.HAND_THUMB_UP,
+  InputSourceId.HAND_POINT_DIRECTION,
+]);
+
 type TestMode = keyof typeof TEST_CONFIGS;
+type SupportedTask = Extract<CalibrationTask, 'TRIGGER' | 'DIRECTION'>;
+
+interface CalibrationSelection {
+  readonly action: string;
+  readonly task: SupportedTask;
+  readonly currentSource: InputSourceId;
+  readonly alternativeSource: InputSourceId;
+}
+
+const DEFAULT_SELECTION: CalibrationSelection = {
+  action: 'DEMO_TRIGGER',
+  task: 'TRIGGER',
+  currentSource: InputSourceId.TOUCH_BUTTON,
+  alternativeSource: InputSourceId.HAND_CLOSED_FIST,
+};
 
 export default function CalibrationClient() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const visionRef = useRef<VisionInputChannel | null>(null);
   const harnessRef = useRef(new CalibrationHarness());
   const directionHarnessRef = useRef(new DirectionCalibrationHarness());
-  const touchSourceRef = useRef(
-    new TriggerCalibrationSource(InputSourceId.TOUCH_BUTTON),
-  );
-  const fistSourceRef = useRef(
-    new TriggerCalibrationSource(InputSourceId.HAND_CLOSED_FIST),
-  );
-  const directionSourceRef = useRef(
-    new DirectionSignalSource(InputSourceId.HAND_POINT_DIRECTION),
-  );
+  const triggerSourcesRef = useRef(createTriggerSources());
+  const directionSourcesRef = useRef(createDirectionSources());
   const profileRef = useRef(new CalibrationProfile());
   const storeRef = useRef<CalibrationProfileStore | null>(null);
   const runTokenRef = useRef(0);
-  const activeTestRef = useRef<TestSource | null>(null);
+  const activeTestRef = useRef<InputSourceId | null>(null);
 
+  const [selection, setSelection] = useState<CalibrationSelection>(DEFAULT_SELECTION);
   const [visionStatus, setVisionStatus] = useState<VisionStatus>('IDLE');
   const [visionDetail, setVisionDetail] = useState(
     'Camera access is required to test camera-based controls. Video processing stays on this device.',
   );
-  const [fistState, setFistState] = useState('OPEN');
-  const [fistConfidence, setFistConfidence] = useState(0);
+  const [detectedSource, setDetectedSource] = useState<InputSourceId | null>(null);
+  const [detectorState, setDetectorState] = useState('READY');
+  const [detectorConfidence, setDetectorConfidence] = useState(0);
   const [direction, setDirection] = useState<{ x: number; y: number } | null>(null);
-  const [activeTest, setActiveTest] = useState<TestSource | null>(null);
+  const [activeTest, setActiveTest] = useState<InputSourceId | null>(null);
   const [testMode, setTestMode] = useState<TestMode>('quick');
-  const [cue, setCue] = useState('Choose a calibration');
+  const [cue, setCue] = useState('Choose an input to test');
   const [progress, setProgress] = useState('0 / 6');
   const [testDetail, setTestDetail] = useState(
-    'Quick test uses six prompts. Choose Full test for twelve.',
+    'Saved results are reused. Run only the input whose result is missing or needs retesting.',
   );
   const [scores, setScores] = useState<readonly ChannelScore[]>([]);
   const [returnHref, setReturnHref] = useState('/');
+  const [skipHref, setSkipHref] = useState('/?calibration=skipped');
 
   useEffect(() => {
-    setReturnHref(
-      safeReturnPath(
-        new URLSearchParams(window.location.search).get('return'),
-        window.location.origin,
-      ),
-    );
+    const search = new URLSearchParams(window.location.search);
+    const nextReturnHref = safeReturnPath(search.get('return'), window.location.origin);
+    setReturnHref(nextReturnHref);
+    setSkipHref(withCalibrationStatus(nextReturnHref, 'skipped', window.location.origin));
+    setSelection(parseSelection(search));
+
     storeRef.current = new CalibrationProfileStore(window.localStorage);
     profileRef.current = storeRef.current.load();
     setScores(profileRef.current.all());
 
     const handleTouchAttempt = (event: PointerEvent): void => {
-      if (activeTestRef.current !== 'touch') return;
+      if (activeTestRef.current !== InputSourceId.TOUCH_BUTTON) return;
       const target = event.target;
       if (target instanceof Element && target.closest('[data-calibration-control]')) return;
-      touchSourceRef.current.accept({
+      triggerSourcesRef.current.get(InputSourceId.TOUCH_BUTTON)?.accept({
         kind: 'trigger',
         source: InputSourceId.TOUCH_BUTTON,
         timestamp: performance.now(),
@@ -108,8 +140,9 @@ export default function CalibrationClient() {
           setVisionDetail(detail);
         },
         onDiagnostic(diagnostic) {
-          setFistState(diagnostic.fistState);
-          setFistConfidence(diagnostic.fistConfidence);
+          setDetectedSource(diagnostic.detectedCommand);
+          setDetectorState(diagnostic.commandState);
+          setDetectorConfidence(diagnostic.commandConfidence);
           setDirection(diagnostic.direction);
         },
       });
@@ -126,25 +159,36 @@ export default function CalibrationClient() {
     };
   }, []);
 
+  const currentScore = findScore(scores, selection.currentSource, selection.task);
+  const alternativeScore = findScore(scores, selection.alternativeSource, selection.task);
+  const comparison = currentScore && alternativeScore
+    ? compareChannelScores(currentScore, alternativeScore)
+    : null;
   const recommendation = useMemo(() => {
     const profile = new CalibrationProfile(scores);
     return new ControlRecommender().recommend(
       {
-        action: TEST_ACTION,
-        requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
-        currentSource: InputSourceId.TOUCH_BUTTON,
-        alternativeSource: InputSourceId.HAND_CLOSED_FIST,
+        action: selection.action,
+        requirements: {
+          task: selection.task,
+          spatial: false,
+          latencyCritical: selection.task === 'DIRECTION',
+        },
+        currentSource: selection.currentSource,
+        alternativeSource: selection.alternativeSource,
       },
       profile,
     );
-  }, [scores]);
+  }, [scores, selection]);
+  const cameraNeeded = isVisionSource(selection.currentSource) ||
+    isVisionSource(selection.alternativeSource);
 
-  const startCamera = async () => {
+  const startCamera = async (): Promise<void> => {
     try {
       await visionRef.current?.start({
         emit(signal: InputSignal) {
-          fistSourceRef.current.accept(signal);
-          directionSourceRef.current.accept(signal);
+          triggerSourcesRef.current.forEach((source) => source.accept(signal));
+          directionSourcesRef.current.forEach((source) => source.accept(signal));
           if (signal.kind === 'direction') setDirection(signal.direction);
           if (signal.kind === 'direction-end') setDirection(null);
         },
@@ -159,7 +203,8 @@ export default function CalibrationClient() {
     }
   };
 
-  const stopTest = () => {
+  const stopTest = (): void => {
+    endTouchDirection();
     activeTestRef.current = null;
     runTokenRef.current += 1;
     harnessRef.current.abort();
@@ -169,7 +214,7 @@ export default function CalibrationClient() {
     setTestDetail('No partial score was saved.');
   };
 
-  const chooseMode = (mode: TestMode) => {
+  const chooseMode = (mode: TestMode): void => {
     if (activeTestRef.current !== null) return;
     setTestMode(mode);
     setProgress(`0 / ${TEST_CONFIGS[mode].trialCount}`);
@@ -180,30 +225,38 @@ export default function CalibrationClient() {
     );
   };
 
-  const calibrate = async (kind: TriggerTestSource) => {
-    if (kind === 'fist' && visionStatus !== 'READY') {
-      setTestDetail('Enable the camera and wait for Ready before testing closed fist.');
+  const calibrateSource = async (sourceId: InputSourceId): Promise<void> => {
+    if (isVisionSource(sourceId) && visionStatus !== 'READY') {
+      setTestDetail(`Enable the camera and wait for Ready before testing ${sourceLabel(sourceId)}.`);
+      return;
+    }
+    if (selection.task === 'TRIGGER') {
+      await calibrateTrigger(sourceId);
+    } else {
+      await calibrateDirection(sourceId);
+    }
+  };
+
+  const calibrateTrigger = async (sourceId: InputSourceId): Promise<void> => {
+    const source = triggerSourcesRef.current.get(sourceId);
+    if (!source) {
+      setTestDetail(`${sourceLabel(sourceId)} does not provide trigger input.`);
       return;
     }
 
     const config = TEST_CONFIGS[testMode];
-    const token = runTokenRef.current + 1;
-    runTokenRef.current = token;
+    const token = ++runTokenRef.current;
     harnessRef.current.abort();
-    activeTestRef.current = kind;
-    setActiveTest(kind);
+    directionHarnessRef.current.abort();
+    activeTestRef.current = sourceId;
+    setActiveTest(sourceId);
     setProgress(`0 / ${config.trialCount}`);
-    setTestDetail(
-      kind === 'touch'
-        ? 'During WAIT, do not touch. Tap Touch action only when TAP NOW appears.'
-        : 'During WAIT, keep your hand open. Make one fist only when MAKE A FIST appears.',
-    );
-    const source = kind === 'touch' ? touchSourceRef.current : fistSourceRef.current;
+    setTestDetail(triggerInstruction(sourceId));
     const session = await harnessRef.current.run(
       {
-        sessionId: `${kind}-${Date.now()}`,
+        sessionId: `${sourceId}-${Date.now()}`,
         task: 'TRIGGER',
-        action: TEST_ACTION,
+        action: selection.action,
         source,
       },
       {
@@ -212,7 +265,7 @@ export default function CalibrationClient() {
           setProgress(`${trialIndex} / ${config.trialCount}`);
         },
         onCue() {
-          setCue(kind === 'touch' ? 'TAP NOW' : 'MAKE A FIST');
+          setCue(triggerCue(sourceId));
         },
         onTrial(trial) {
           setProgress(`${trial.trialIndex + 1} / ${config.trialCount}`);
@@ -236,44 +289,39 @@ export default function CalibrationClient() {
       setTestDetail('No partial score was saved.');
       return;
     }
-
-    const score = scoreCalibration(session);
-    profileRef.current.save(score);
-    storeRef.current?.save(profileRef.current);
-    setScores(profileRef.current.all());
+    saveScore(scoreCalibration(session));
     setCue('Saved');
-    setTestDetail(
-      `${kind === 'touch' ? 'Touch' : 'Closed fist'} result saved to this browser.`,
-    );
+    setTestDetail(`${sourceLabel(sourceId)} result saved independently on this device.`);
   };
 
-  const calibratePointing = async () => {
-    if (visionStatus !== 'READY') {
-      setTestDetail('Enable the camera and wait for Ready before calibrating pointing.');
+  const calibrateDirection = async (sourceId: InputSourceId): Promise<void> => {
+    const source = directionSourcesRef.current.get(sourceId);
+    if (!source) {
+      setTestDetail(`${sourceLabel(sourceId)} does not provide directional input.`);
       return;
     }
+
+    const trialCount = 8;
     const token = ++runTokenRef.current;
     harnessRef.current.abort();
     directionHarnessRef.current.abort();
-    activeTestRef.current = 'pointing';
-    setActiveTest('pointing');
-    setProgress('0 / 8');
-    setTestDetail(
-      'Point in the shown direction and hold steadily. Left must show a negative x value.',
-    );
+    activeTestRef.current = sourceId;
+    setActiveTest(sourceId);
+    setProgress(`0 / ${trialCount}`);
+    setTestDetail(directionInstruction(sourceId));
     const session = await directionHarnessRef.current.run(
       {
-        sessionId: `point-${Date.now()}`,
-        action: 'DEMO_DIRECTION',
-        source: directionSourceRef.current,
+        sessionId: `${sourceId}-${Date.now()}`,
+        action: selection.action,
+        source,
       },
       {
         onCue(index, target) {
-          setCue(directionCueLabel(target));
-          setProgress(`${index} / 8`);
+          setCue(directionCueLabel(target, sourceId));
+          setProgress(`${index} / ${trialCount}`);
         },
         onTrial(trial) {
-          setProgress(`${trial.trialIndex + 1} / 8`);
+          setProgress(`${trial.trialIndex + 1} / ${trialCount}`);
           setCue(
             trial.outcome === 'success'
               ? `${Math.round(trial.latencyMs ?? 0)} ms`
@@ -281,30 +329,65 @@ export default function CalibrationClient() {
           );
         },
       },
+      { trialCount },
     );
-    if (token !== runTokenRef.current || session.trials.length !== 8) return;
+
+    endTouchDirection();
+    if (token !== runTokenRef.current) return;
     activeTestRef.current = null;
     setActiveTest(null);
-    const score = scoreDirectionCalibration(session);
+    if (session.trials.length !== trialCount) {
+      setCue('Incomplete');
+      setTestDetail('No partial score was saved.');
+      return;
+    }
+    saveScore(scoreDirectionCalibration(session));
+    setCue('Saved');
+    setTestDetail(
+      `${sourceLabel(sourceId)} latency, angular error, jitter and dropouts were saved independently.`,
+    );
+  };
+
+  const saveScore = (score: ChannelScore): void => {
     profileRef.current.save(score);
     storeRef.current?.save(profileRef.current);
     setScores(profileRef.current.all());
-    setCue('Pointing saved');
-    setTestDetail('Directional latency, accuracy, jitter and dropouts were saved.');
   };
 
-  const clearScores = () => {
+  const clearScores = (): void => {
     profileRef.current = new CalibrationProfile();
     storeRef.current?.clear();
     setScores([]);
     setCue('Results cleared');
   };
 
-  const touchScore = findScore(scores, InputSourceId.TOUCH_BUTTON);
-  const fistScore = findScore(scores, InputSourceId.HAND_CLOSED_FIST);
-  const directionScore = findScore(scores, InputSourceId.HAND_POINT_DIRECTION, 'DIRECTION');
-  const comparison =
-    touchScore && fistScore ? compareChannelScores(touchScore, fistScore) : null;
+  const emitTouchDirection = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (activeTestRef.current !== InputSourceId.TOUCH_DIRECTION) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - (rect.left + rect.width / 2);
+    const y = event.clientY - (rect.top + rect.height / 2);
+    const magnitude = Math.hypot(x, y);
+    if (magnitude < 8) return;
+    const next = { x: x / magnitude, y: y / magnitude };
+    directionSourcesRef.current.get(InputSourceId.TOUCH_DIRECTION)?.accept({
+      kind: 'direction',
+      source: InputSourceId.TOUCH_DIRECTION,
+      timestamp: performance.now(),
+      direction: next,
+    });
+    setDirection(next);
+  };
+
+  const endTouchDirection = (): void => {
+    if (activeTestRef.current !== InputSourceId.TOUCH_DIRECTION) return;
+    directionSourcesRef.current.get(InputSourceId.TOUCH_DIRECTION)?.accept({
+      kind: 'direction-end',
+      source: InputSourceId.TOUCH_DIRECTION,
+      timestamp: performance.now(),
+    });
+    setDirection(null);
+  };
 
   return (
     <main className="calibration-lab">
@@ -313,92 +396,114 @@ export default function CalibrationClient() {
         <span>CONTROL SETUP</span>
         <h1>Input Performance Test</h1>
         <p>
-          Test your current control and an alternative. Compare detection, response time and
-          accidental activations before choosing which control to use.
+          The active input and proposed alternative are measured independently. Existing results
+          are reused; choosing an alternative here does not activate or bind it.
         </p>
       </header>
 
-      <section className="lab-grid">
-        <article className="lab-panel">
-          <div className="panel-title">
-            <h2>Camera input</h2>
-            <span className={`vision-status ${visionStatus.toLowerCase()}`}>{visionStatus}</span>
-          </div>
-          <div className="camera-frame">
-            <video ref={videoRef} playsInline muted />
-            {visionStatus !== 'READY' && <div className="camera-placeholder">Camera preview</div>}
-          </div>
-          <p>{visionDetail}</p>
-          <div className="reading-row">
-            <span>Detected hand state</span>
-            <strong>{fistState}</strong>
-          </div>
-          <div className="confidence-track">
-            <i style={{ width: `${Math.round(fistConfidence * 100)}%` }} />
-          </div>
-          <div className="direction-diagnostic" aria-live="polite">
-            <span
-              className={`direction-arrow ${direction ? 'active' : ''}`}
-              style={{
-                transform: `rotate(${direction ? Math.atan2(direction.y, direction.x) * 180 / Math.PI : 0}deg)`,
-              }}
-            >
-              ➜
-            </span>
-            <code>
-              {direction
-                ? `{ x: ${direction.x.toFixed(2)}, y: ${direction.y.toFixed(2)} }`
-                : '{ x: —, y: — }'}
-            </code>
-          </div>
-          <div className="button-row">
-            <button data-calibration-control onClick={() => void startCamera()}>Enable camera</button>
-            <button data-calibration-control onClick={() => visionRef.current?.stop()}>Stop camera</button>
-          </div>
-        </article>
+      <section className="source-cards" aria-label="Inputs being compared">
+        <SourceCard
+          role="Current input"
+          source={selection.currentSource}
+          score={currentScore}
+          active={activeTest === selection.currentSource}
+          onTest={() => void calibrateSource(selection.currentSource)}
+        />
+        <SourceCard
+          role="Proposed alternative"
+          source={selection.alternativeSource}
+          score={alternativeScore}
+          active={activeTest === selection.alternativeSource}
+          onTest={() => void calibrateSource(selection.alternativeSource)}
+        />
+      </section>
+
+      <section className={`lab-grid ${cameraNeeded ? '' : 'single-column'}`}>
+        {cameraNeeded && (
+          <article className="lab-panel">
+            <div className="panel-title">
+              <h2>Camera input</h2>
+              <span className={`vision-status ${visionStatus.toLowerCase()}`}>{visionStatus}</span>
+            </div>
+            <div className="camera-frame">
+              <video ref={videoRef} playsInline muted />
+              {visionStatus !== 'READY' && <div className="camera-placeholder">Camera preview</div>}
+            </div>
+            <p>{visionDetail}</p>
+            <div className="reading-row">
+              <span>Detected input</span>
+              <strong>{direction ? 'Point direction' : detectedSource ? sourceLabel(detectedSource) : 'Neutral'}</strong>
+            </div>
+            <div className="reading-row">
+              <span>Detector state</span>
+              <strong>{detectorState}</strong>
+            </div>
+            <div className="confidence-track">
+              <i style={{ width: `${Math.round(detectorConfidence * 100)}%` }} />
+            </div>
+            <DirectionDiagnostic direction={direction} />
+            <div className="button-row">
+              <button data-calibration-control onClick={() => void startCamera()}>Enable camera</button>
+              <button data-calibration-control onClick={() => visionRef.current?.stop()}>Stop camera</button>
+            </div>
+          </article>
+        )}
 
         <article className="lab-panel test-panel">
           <div className="panel-title">
-            <h2>Input test</h2>
+            <h2>{selection.task === 'TRIGGER' ? 'Activation test' : 'Direction test'}</h2>
             <span>{progress}</span>
           </div>
-          <div className="mode-row" aria-label="Calibration length">
-            {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
-              <button
-                data-calibration-control
-                className={testMode === mode ? 'selected' : ''}
-                disabled={activeTest !== null}
-                key={mode}
-                onClick={() => chooseMode(mode)}
-              >
-                {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
-              </button>
-            ))}
-          </div>
+          {selection.task === 'TRIGGER' && (
+            <div className="mode-row" aria-label="Calibration length">
+              {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
+                <button
+                  data-calibration-control
+                  className={testMode === mode ? 'selected' : ''}
+                  disabled={activeTest !== null}
+                  key={mode}
+                  onClick={() => chooseMode(mode)}
+                >
+                  {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
+                </button>
+              ))}
+            </div>
+          )}
           <div className={`test-cue ${activeTest ? 'active' : ''}`}>{cue}</div>
           <p>{testDetail}</p>
-          <div className="button-row">
-            <button data-calibration-control onClick={() => void calibrate('touch')}>Test touch</button>
-            <button data-calibration-control onClick={() => void calibrate('fist')}>Test closed fist</button>
-            <button data-calibration-control onClick={() => void calibratePointing()}>Calibrate pointing</button>
+          {selection.task === 'TRIGGER' && activeTest === InputSourceId.TOUCH_BUTTON && (
             <button className="touch-action">Touch action</button>
+          )}
+          {selection.task === 'DIRECTION' && activeTest === InputSourceId.TOUCH_DIRECTION && (
+            <div
+              className="direction-pad"
+              onPointerDown={emitTouchDirection}
+              onPointerMove={emitTouchDirection}
+              onPointerUp={endTouchDirection}
+              onPointerCancel={endTouchDirection}
+              role="application"
+              aria-label="Touch direction calibration pad"
+            >
+              <span>Touch, drag and hold toward the cue</span>
+              <i />
+            </div>
+          )}
+          <div className="button-row test-actions">
             <button data-calibration-control onClick={stopTest}>Stop test</button>
+            <a className="skip-calibration" href={skipHref} data-calibration-control>
+              Skip calibration for testing
+            </a>
           </div>
+          <small className="skip-note">
+            Skipping saves no score and never marks either input as calibrated.
+          </small>
         </article>
       </section>
 
-      {directionScore?.directionMetrics && (
-        <section className="lab-panel direction-results">
-          <div className="panel-title">
-            <h2>Pointing results</h2>
-            <span>{Math.round(directionScore.successRate * 100)}% success</span>
-          </div>
-          <div className="direction-metrics">
-            <span>Median latency <strong>{directionScore.medianLatencyMs === null ? '—' : `${Math.round(directionScore.medianLatencyMs)} ms`}</strong></span>
-            <span>Angular error <strong>{directionScore.directionMetrics.meanAngularErrorDeg.toFixed(1)}°</strong></span>
-            <span>Jitter <strong>{directionScore.directionMetrics.meanJitterDeg.toFixed(1)}°</strong></span>
-            <span>Dropouts <strong>{directionScore.directionMetrics.dropoutCount}</strong></span>
-          </div>
+      {selection.task === 'DIRECTION' && (
+        <section className="direction-result-grid">
+          <DirectionResult label={sourceLabel(selection.currentSource)} score={currentScore} />
+          <DirectionResult label={sourceLabel(selection.alternativeSource)} score={alternativeScore} />
         </section>
       )}
 
@@ -407,13 +512,19 @@ export default function CalibrationClient() {
           <h2>Results</h2>
           <button data-calibration-control onClick={clearScores}>Clear saved results</button>
         </div>
-        <ComparisonTable current={touchScore} alternative={fistScore} comparison={comparison} />
+        <ComparisonTable
+          currentLabel={sourceLabel(selection.currentSource)}
+          alternativeLabel={sourceLabel(selection.alternativeSource)}
+          current={currentScore}
+          alternative={alternativeScore}
+          comparison={comparison}
+        />
         <div className={`recommendation ${recommendation.verdict}`}>
           <span>{verdictLabel(recommendation.verdict)}</span>
           <strong>{recommendation.explanation}</strong>
           <small>Your controls have not been changed. You keep the final choice.</small>
         </div>
-        {touchScore && fistScore && (
+        {currentScore && alternativeScore && (
           <a className="review-binding" href={returnHref} data-calibration-control>
             Review binding decision
           </a>
@@ -421,6 +532,56 @@ export default function CalibrationClient() {
       </section>
     </main>
   );
+}
+
+function createTriggerSources(): Map<InputSourceId, TriggerCalibrationSource> {
+  return new Map(
+    TRIGGER_SOURCES.map((source) => [source, new TriggerCalibrationSource(source)] as const),
+  );
+}
+
+function createDirectionSources(): Map<InputSourceId, DirectionSignalSource> {
+  return new Map(
+    DIRECTION_SOURCES.map((source) => [source, new DirectionSignalSource(source)] as const),
+  );
+}
+
+function parseSelection(search: URLSearchParams): CalibrationSelection {
+  const task = search.get('task');
+  const currentSource = parseSource(search.get('current'));
+  const alternativeSource = parseSource(search.get('alternative'));
+  const supportedTask = task === 'TRIGGER' || task === 'DIRECTION' ? task : null;
+  if (
+    !supportedTask ||
+    !currentSource ||
+    !alternativeSource ||
+    currentSource === alternativeSource ||
+    !supportsTask(currentSource, supportedTask) ||
+    !supportsTask(alternativeSource, supportedTask)
+  ) {
+    return DEFAULT_SELECTION;
+  }
+  return {
+    action: search.get('action') || DEFAULT_SELECTION.action,
+    task: supportedTask,
+    currentSource,
+    alternativeSource,
+  };
+}
+
+function supportsTask(source: InputSourceId, task: SupportedTask): boolean {
+  return task === 'TRIGGER'
+    ? (TRIGGER_SOURCES as readonly InputSourceId[]).includes(source)
+    : (DIRECTION_SOURCES as readonly InputSourceId[]).includes(source);
+}
+
+function parseSource(value: string | null): InputSourceId | null {
+  if (!value) return null;
+  return Object.values(InputSourceId).find((source) => source === value) ?? null;
+}
+
+function isVisionSource(source: InputSourceId): boolean {
+  return VISION_SOURCES.has(source);
 }
 
 function safeReturnPath(requested: string | null, origin: string): string {
@@ -434,28 +595,146 @@ function safeReturnPath(requested: string | null, origin: string): string {
   }
 }
 
+function withCalibrationStatus(path: string, status: string, origin: string): string {
+  const parsed = new URL(path, origin);
+  parsed.searchParams.set('calibration', status);
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
 function findScore(
   scores: readonly ChannelScore[],
   source: InputSourceId,
-  task: ChannelScore['task'] = 'TRIGGER',
+  task: ChannelScore['task'],
 ): ChannelScore | undefined {
   return scores.find((score) => score.task === task && score.source === source);
 }
 
-function directionCueLabel(cue: DirectionCue): string {
-  return ({
-    up: '↑ POINT UP',
-    down: '↓ POINT DOWN',
-    left: '← POINT LEFT',
-    right: '→ POINT RIGHT',
-  })[cue];
+function sourceLabel(source: InputSourceId): string {
+  const labels: Partial<Record<InputSourceId, string>> = {
+    [InputSourceId.TOUCH_BUTTON]: 'Touch button',
+    [InputSourceId.TOUCH_DIRECTION]: 'Touch direction',
+    [InputSourceId.HAND_CLOSED_FIST]: 'Closed fist',
+    [InputSourceId.HAND_OPEN_PALM]: 'Open palm',
+    [InputSourceId.HAND_THUMB_UP]: 'Thumbs up',
+    [InputSourceId.HAND_POINT_DIRECTION]: 'Point direction',
+  };
+  return labels[source] ?? source;
+}
+
+function triggerInstruction(source: InputSourceId): string {
+  switch (source) {
+    case InputSourceId.TOUCH_BUTTON:
+      return 'During WAIT, do not touch. Press Touch action only when TAP NOW appears.';
+    case InputSourceId.HAND_CLOSED_FIST:
+      return 'During WAIT, relax your hand. Make one closed fist only when prompted.';
+    case InputSourceId.HAND_OPEN_PALM:
+      return 'During WAIT, keep your hand out of the pose. Show one open palm only when prompted.';
+    case InputSourceId.HAND_THUMB_UP:
+      return 'During WAIT, keep a neutral hand. Show one thumbs-up only when prompted.';
+    default:
+      return 'Respond once when the cue appears.';
+  }
+}
+
+function triggerCue(source: InputSourceId): string {
+  switch (source) {
+    case InputSourceId.TOUCH_BUTTON:
+      return 'TAP NOW';
+    case InputSourceId.HAND_CLOSED_FIST:
+      return 'MAKE A FIST';
+    case InputSourceId.HAND_OPEN_PALM:
+      return 'SHOW OPEN PALM';
+    case InputSourceId.HAND_THUMB_UP:
+      return 'THUMBS UP';
+    default:
+      return 'ACTIVATE NOW';
+  }
+}
+
+function directionInstruction(source: InputSourceId): string {
+  return source === InputSourceId.TOUCH_DIRECTION
+    ? 'Touch the pad, drag toward the shown direction and hold briefly.'
+    : 'Point in the shown direction and hold steadily. Left must produce a negative x value.';
+}
+
+function directionCueLabel(cue: DirectionCue, source: InputSourceId): string {
+  const verb = source === InputSourceId.TOUCH_DIRECTION ? 'MOVE' : 'POINT';
+  const arrow = { up: '↑', down: '↓', left: '←', right: '→' }[cue];
+  return `${arrow} ${verb} ${cue.toUpperCase()}`;
+}
+
+function SourceCard({
+  role,
+  source,
+  score,
+  active,
+  onTest,
+}: {
+  role: string;
+  source: InputSourceId;
+  score?: ChannelScore;
+  active: boolean;
+  onTest: () => void;
+}) {
+  return (
+    <article className={`source-card ${active ? 'active' : ''}`}>
+      <span>{role}</span>
+      <strong>{sourceLabel(source)}</strong>
+      <small>{score ? `${evidenceLabel(score)} saved on this device` : 'Calibration required'}</small>
+      <button data-calibration-control disabled={active} onClick={onTest}>
+        {score ? `Retest ${sourceLabel(source)}` : `Test ${sourceLabel(source)}`}
+      </button>
+    </article>
+  );
+}
+
+function DirectionDiagnostic({ direction }: { direction: { x: number; y: number } | null }) {
+  return (
+    <div className="direction-diagnostic" aria-live="polite">
+      <span
+        className={`direction-arrow ${direction ? 'active' : ''}`}
+        style={{
+          transform: `rotate(${direction ? Math.atan2(direction.y, direction.x) * 180 / Math.PI : 0}deg)`,
+        }}
+      >
+        ➜
+      </span>
+      <code>
+        {direction
+          ? `{ x: ${direction.x.toFixed(2)}, y: ${direction.y.toFixed(2)} }`
+          : '{ x: —, y: — }'}
+      </code>
+    </div>
+  );
+}
+
+function DirectionResult({ label, score }: { label: string; score?: ChannelScore }) {
+  const metrics = score?.directionMetrics;
+  return (
+    <section className="lab-panel direction-results">
+      <div className="panel-title">
+        <h2>{label}</h2>
+        <span>{score ? `${Math.round(score.successRate * 100)}% success` : 'Not calibrated'}</span>
+      </div>
+      <div className="direction-metrics">
+        <span>Median latency <strong>{formatLatency(score)}</strong></span>
+        <span>Angular error <strong>{metrics ? `${metrics.meanAngularErrorDeg.toFixed(1)}°` : '—'}</strong></span>
+        <span>Jitter <strong>{metrics ? `${metrics.meanJitterDeg.toFixed(1)}°` : '—'}</strong></span>
+        <span>Dropouts <strong>{metrics?.dropoutCount ?? '—'}</strong></span>
+      </div>
+    </section>
+  );
 }
 
 function ComparisonTable({
+  currentLabel,
+  alternativeLabel,
   current,
   alternative,
   comparison,
 }: {
+  currentLabel: string;
+  alternativeLabel: string;
   current?: ChannelScore;
   alternative?: ChannelScore;
   comparison: ReturnType<typeof compareChannelScores> | null;
@@ -466,8 +745,8 @@ function ComparisonTable({
         <thead>
           <tr>
             <th>Measurement</th>
-            <th>Original touch</th>
-            <th>Closed fist</th>
+            <th>{currentLabel} · current</th>
+            <th>{alternativeLabel} · proposed</th>
           </tr>
         </thead>
         <tbody>
@@ -560,7 +839,7 @@ function formatSuccess(score?: ChannelScore): string {
 }
 
 function formatLatency(score?: ChannelScore): string {
-  if (!score || score.medianLatencyMs === null) return 'No successful response';
+  if (!score || score.medianLatencyMs === null) return '—';
   return `${Math.round(score.medianLatencyMs)} ms`;
 }
 
@@ -580,6 +859,7 @@ function formatDuration(durationMs: number): string {
 
 function evidenceLabel(score?: ChannelScore): string | undefined {
   if (!score) return undefined;
+  if (score.task === 'DIRECTION') return `${score.trialCount}-direction test`;
   return score.trialCount >= 12 ? 'Full test' : 'Quick estimate';
 }
 

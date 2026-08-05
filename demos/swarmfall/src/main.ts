@@ -1348,13 +1348,19 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
   onSettingsVisibilityChanged: (open) => {
     ui.settingsLayer.toggleAttribute('hidden', !open);
   },
-  onCalibrationRequested: ({ action, source }) => {
+  onCalibrationRequested: ({ action, task, currentSource, alternativeSource }) => {
     const returnQuery = new URLSearchParams({
       adaptiveControls: 'review',
       action,
-      source,
+      source: alternativeSource,
     });
-    const calibrationQuery = new URLSearchParams({ return: `/?${returnQuery.toString()}` });
+    const calibrationQuery = new URLSearchParams({
+      return: `/?${returnQuery.toString()}`,
+      action,
+      task,
+      current: currentSource,
+      alternative: alternativeSource,
+    });
     window.location.assign(`/calibration?${calibrationQuery.toString()}`);
   },
   onVisionStatus: (status, detail) => {
