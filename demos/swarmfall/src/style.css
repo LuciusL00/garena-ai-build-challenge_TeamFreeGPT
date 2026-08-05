@@ -17,7 +17,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: var(--bg); }
+body { margin: 0; min-width: 320px; overflow-x: hidden; background: var(--bg); }
 button { font: inherit; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 
@@ -32,8 +32,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .controls-trigger strong { color: var(--cyan); font-size: 11px; }
 .input-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .input-indicator.active { background: var(--lime); box-shadow: 0 0 8px var(--lime); }
-.statusbar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 10px; overflow: hidden; }
-.status-cell { padding: 12px 16px; background: rgba(15, 33, 28, .8); }
+.statusbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-top: 10px; overflow: hidden; }
+.status-cell { min-width: 0; padding: 12px 16px; background: rgba(15, 33, 28, .8); }
 .value { display: block; margin-top: 3px; color: var(--text); font: 700 clamp(22px, 4vw, 34px)/1 "Consolas", monospace; }
 .value.danger { color: var(--danger); }
 .game-area { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 10px; margin-top: 10px; }
@@ -120,13 +120,26 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .mission { text-align: left; }
   .game-area { grid-template-columns: 1fr; }
   .arena-frame, #arena { min-height: 58svh; }
-  .side-panel { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .side-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .side-panel > .panel-title, .side-panel > .panel-copy, .side-panel > .active-strategy, .side-panel > .squad-readout { grid-column: 1 / -1; }
   .settings-layer { align-items: end; padding: 0; }
   .settings-sheet { width: 100%; max-height: 94svh; border-width: 1px 0 0; }
   .settings-body { grid-template-columns: 1fr; }
   .settings-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); border-right: 0; border-bottom: 1px solid var(--line); }
   .bottom-bar { flex-direction: column; }
+}
+
+@media (max-width: 480px) {
+  .status-cell { padding: 10px 7px; }
+  .status-cell .label { display: block; font-size: 9px; letter-spacing: .06em; overflow-wrap: anywhere; }
+  .status-cell .value { font-size: 20px; }
+  .overlay { padding: 12px; }
+  .overlay-card { padding: 20px; }
+  .overlay h1 { font-size: 30px; }
+  .side-panel { grid-template-columns: 1fr; }
+  .side-panel > * { grid-column: 1; }
+  .settings-source-list, .settings-buttons { grid-template-columns: 1fr; }
+  .training-reading { align-items: flex-start; flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

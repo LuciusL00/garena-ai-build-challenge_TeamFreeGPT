@@ -176,9 +176,8 @@ export class BindingSettingsController<M extends object> {
   confirm(
     preview: BindingChangePreview<ActionKey<M>>,
     replaceConflicts: boolean = false,
-    allowUncalibrated: boolean = false,
   ): void {
-    this.applyConfirmedChange(preview, replaceConflicts, allowUncalibrated);
+    this.applyConfirmedChange(preview, replaceConflicts, false);
   }
 
   /**

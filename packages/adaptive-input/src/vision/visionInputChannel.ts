@@ -237,7 +237,7 @@ export class VisionInputChannel implements InputChannel {
       this.commandGate.update(timestamp, detectedCommand);
 
       let direction: DirectionVector | null = null;
-      if (this.commandGate.state !== 'READY') {
+      if (detectedCommand !== null) {
         if (this.pointing) this.emitPointingEnd(timestamp);
         else this.point.reset();
       } else {

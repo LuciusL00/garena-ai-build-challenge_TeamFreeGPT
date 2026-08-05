@@ -437,7 +437,8 @@ async function main(): Promise<void> {
   );
   check('binding remains unavailable until both inputs are measured', !unmeasuredPreview.readyToApply);
   check('preview does not mutate the live binding', adaptive.bindings.get('TOGGLE_SQUAD') === bindingBeforePreview);
-  settings.confirm(unmeasuredPreview, true, true);
+  checkThrows('normal confirmation rejects an unmeasured binding', () => settings.confirm(unmeasuredPreview, true));
+  settings.confirmWithoutCalibration(unmeasuredPreview, true);
   check('explicit skip applies an uncalibrated binding', adaptive.bindings.get('TOGGLE_SQUAD') === InputSourceId.HAND_CLOSED_FIST);
   adaptive.rebind('TOGGLE_SQUAD', InputSourceId.TOUCH_BUTTON);
   const measuredPreview = settings.preview(
