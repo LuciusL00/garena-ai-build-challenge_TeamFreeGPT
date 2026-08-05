@@ -89,6 +89,7 @@ export class SwarmfallAdaptiveInput {
   private selectedSource: InputSourceId | null = null;
   private stage: SwarmfallBindingSettingsView['stage'] = 'CHOOSE';
   private training = false;
+  private activeDirectionSource: InputSourceId | null = null;
 
   constructor(gameBus: GameActionBus, video: HTMLVideoElement, private readonly callbacks: SwarmfallAdaptiveCallbacks) {
     this.adaptive.registerActions(SWARMFALL_ACTION_CATALOG);
@@ -142,8 +143,13 @@ export class SwarmfallAdaptiveInput {
     }
     try {
       await this.startVision(false);
-      this.applyGestureScheme();
-      this.callbacks.onNotice('Gesture control scheme enabled.', false);
+      const usedWithoutTesting = this.applyGestureScheme();
+      this.callbacks.onNotice(
+        usedWithoutTesting
+          ? 'Gesture controls enabled without testing. No recommendation was recorded.'
+          : 'Gesture control scheme enabled.',
+        false,
+      );
     } catch {
       this.callbacks.onNotice('Gesture controls could not start. Touch controls remain active.', true);
     }
@@ -193,14 +199,19 @@ export class SwarmfallAdaptiveInput {
     if (preview.requiresCamera && this.visionStatus !== 'READY') {
       try { await this.startVision(false); } catch { return; }
     }
-    this.settings.confirm(preview, true, true);
+    this.stopActiveDirectionBeforeBindingChange(preview.action, preview.to);
+    if (preview.readyToApply) this.settings.confirm(preview, true);
+    else this.settings.confirmWithoutCalibration(preview, true);
     this.saveBindings();
-    if (!preview.readyToApply) this.callbacks.onNotice(`${preview.toLabel} enabled without calibration.`, false);
+    if (!preview.readyToApply) this.callbacks.onNotice(`${preview.toLabel} enabled without testing. No recommendation was recorded.`, false);
     else this.callbacks.onNotice(`${preview.toLabel} now controls ${preview.actionLabel}.`, false);
     this.selectedSource = null; this.stage = 'CHOOSE'; this.refreshSettings();
   }
 
   resetSelectedBinding(): void {
+    const action = this.settings.actions().find((candidate) => candidate.id === this.selectedAction);
+    if (!action) return;
+    this.stopActiveDirectionBeforeBindingChange(action.id, action.defaultSource);
     this.settings.reset(this.selectedAction);
     this.saveBindings();
     this.selectedSource = null; this.stage = 'CHOOSE';
@@ -252,17 +263,30 @@ export class SwarmfallAdaptiveInput {
     return touch ? 'TOUCH' : 'CUSTOM';
   }
 
-  private applyGestureScheme(): void {
+  private applyGestureScheme(): boolean {
+    const profile = this.profileStore.load();
+    let usedWithoutTesting = false;
     this.settings.actions().forEach((action) => {
       const source = GESTURE_SCHEME[action.id];
-      if (source && action.currentSource !== source) this.adaptive.rebind(action.id, source);
+      if (!source || action.currentSource === source) return;
+      const preview = this.settings.preview(action.id, source, profile);
+      this.stopActiveDirectionBeforeBindingChange(action.id, source);
+      if (preview.readyToApply) this.settings.confirm(preview, true);
+      else {
+        this.settings.confirmWithoutCalibration(preview, true);
+        usedWithoutTesting = true;
+      }
     });
     this.saveBindings();
     this.refreshSettings();
+    return usedWithoutTesting;
   }
 
   private applyTouchScheme(): void {
-    this.settings.actions().forEach((action) => this.settings.reset(action.id));
+    this.settings.actions().forEach((action) => {
+      this.stopActiveDirectionBeforeBindingChange(action.id, action.defaultSource);
+      this.settings.reset(action.id);
+    });
     this.saveBindings();
     this.vision.stop();
     this.refreshSettings();
@@ -292,7 +316,9 @@ export class SwarmfallAdaptiveInput {
       try { await this.startVision(false); } catch { return; }
     }
     saved.forEach(({ action, source }) => {
-      if (this.adaptive.bindings.get(action) !== source) this.adaptive.rebind(action, source);
+      if (this.adaptive.bindings.get(action) === source) return;
+      this.stopActiveDirectionBeforeBindingChange(action, source);
+      this.adaptive.rebind(action, source);
     });
     this.refreshSettings();
   }
@@ -301,14 +327,23 @@ export class SwarmfallAdaptiveInput {
     let restored = false;
     this.settings.actions().forEach((action) => {
       if (channelOf(action.currentSource) !== InputChannelId.HAND_VISION) return;
+      this.stopActiveDirectionBeforeBindingChange(action.id, action.defaultSource);
       this.settings.reset(action.id); restored = true;
     });
     if (restored) this.callbacks.onNotice('Visual input stopped. Touch controls were restored.', true);
   }
 
   private handleVisionSignal(signal: InputSignal): void {
-    if (signal.kind === 'trigger') TRIGGER_ACTIONS.forEach((action) => this.emitTriggerFor(action, signal));
-    else this.emitDirection(signal);
+    if (signal.kind === 'trigger') {
+      const action = TRIGGER_ACTIONS.find((candidate) =>
+        this.adaptive.bindings.isBound(candidate, signal.source),
+      );
+      if (action) this.emitTriggerFor(action, signal);
+      return;
+    }
+    if (signal.kind === 'direction' || signal.kind === 'direction-end') {
+      this.emitDirection(signal);
+    }
   }
 
   private emitTriggerFor(action: typeof TRIGGER_ACTIONS[number], signal: TriggerInputSignal): void {
@@ -321,7 +356,35 @@ export class SwarmfallAdaptiveInput {
   }
 
   private emitDirection(signal: DirectionInputSignal | Extract<InputSignal, { kind: 'direction-end' }>): void {
-    this.adaptive.emitFrom('DIRECT_UNITS', { direction: signal.kind === 'direction' ? signal.direction : null }, signal);
+    const accepted = this.adaptive.emitFrom(
+      'DIRECT_UNITS',
+      { direction: signal.kind === 'direction' ? signal.direction : null },
+      signal,
+    );
+    if (!accepted) return;
+    if (signal.kind === 'direction') this.activeDirectionSource = signal.source;
+    else if (this.activeDirectionSource === signal.source) this.activeDirectionSource = null;
+  }
+
+  private stopActiveDirectionBeforeBindingChange(
+    action: GameAction,
+    nextSource: InputSourceId,
+  ): void {
+    if (action !== 'DIRECT_UNITS') return;
+    const currentSource = this.adaptive.bindings.get(action);
+    if (
+      currentSource === undefined ||
+      currentSource === nextSource ||
+      this.activeDirectionSource !== currentSource
+    ) {
+      return;
+    }
+    this.emitDirection({
+      kind: 'direction-end',
+      source: currentSource,
+      timestamp: performance.now(),
+      phase: 'gameplay',
+    });
   }
 }
 

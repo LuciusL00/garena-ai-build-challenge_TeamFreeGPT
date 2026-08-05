@@ -178,6 +178,28 @@ export class BindingSettingsController<M extends object> {
     replaceConflicts: boolean = false,
     allowUncalibrated: boolean = false,
   ): void {
+    this.applyConfirmedChange(preview, replaceConflicts, allowUncalibrated);
+  }
+
+  /**
+   * Explicit opt-out from testing. This applies no score or recommendation and
+   * is valid only while the preview still reports missing calibration.
+   */
+  confirmWithoutCalibration(
+    preview: BindingChangePreview<ActionKey<M>>,
+    replaceConflicts: boolean = false,
+  ): void {
+    if (preview.readyToApply) {
+      throw new Error('Use confirm() when calibration evidence is available.');
+    }
+    this.applyConfirmedChange(preview, replaceConflicts, true);
+  }
+
+  private applyConfirmedChange(
+    preview: BindingChangePreview<ActionKey<M>>,
+    replaceConflicts: boolean,
+    allowUncalibrated: boolean,
+  ): void {
     if (!preview.readyToApply && !allowUncalibrated) {
       throw new Error('Calibration is required before applying this binding.');
     }
