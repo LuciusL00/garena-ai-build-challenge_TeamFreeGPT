@@ -164,24 +164,41 @@ function squadForKind(kind: UnitKind): Squad {
   return kind === 'GUARD' ? 'GUARDS' : 'HARVESTERS';
 }
 
-function formationAnchor(center: Point, kind: UnitKind, mode: FormationMode, index: number): Point {
-  const radius = mode === 'GATHERED' ? BALANCE.gatherRadius : BALANCE.spreadRadius;
+function squadSpatialScale(width: number, height: number): number {
+  return clamp(
+    Math.min(width, height) / BALANCE.squadSpatialReferenceSize,
+    BALANCE.squadSpatialMinScale,
+    1,
+  );
+}
+
+function formationAnchor(
+  center: Point,
+  kind: UnitKind,
+  mode: FormationMode,
+  index: number,
+  spatialScale = 1,
+): Point {
+  const baseRadius = mode === 'GATHERED' ? BALANCE.gatherRadius : BALANCE.spreadRadius;
+  const radius = baseRadius * spatialScale;
   const count = kind === 'GUARD' ? BALANCE.guardCount : BALANCE.harvesterCount;
   const phase = kind === 'GUARD' ? -Math.PI / 2 : Math.PI / 2;
   const angle = phase + (index / count) * TAU;
   return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
 }
 
-function activityRadius(mode: FormationMode): number {
-  return mode === 'GATHERED'
+function activityRadius(mode: FormationMode, spatialScale = 1): number {
+  const radius = mode === 'GATHERED'
     ? BALANCE.squadActivityGatherRadius
     : BALANCE.squadActivitySpreadRadius;
+  return radius * spatialScale;
 }
 
-function idlePatrolRadius(mode: FormationMode): number {
-  return mode === 'GATHERED'
+function idlePatrolRadius(mode: FormationMode, spatialScale = 1): number {
+  const radius = mode === 'GATHERED'
     ? BALANCE.idleGatherPatrolRadius
     : BALANCE.idleSpreadPatrolRadius;
+  return radius * spatialScale;
 }
 
 function makeStars(width: number, height: number): Point[] {
@@ -193,6 +210,7 @@ function makeStars(width: number, height: number): Point[] {
 
 function createRoundState(width: number, height: number): GameState {
   const layout = getArenaLayout(width, height);
+  const spatialScale = squadSpatialScale(width, height);
   const formations = new Map<Squad, FormationMode>([['GUARDS', 'SPREAD'], ['HARVESTERS', 'SPREAD']]);
   const squadCenters = new Map<Squad, Point>([
     ['GUARDS', getInitialSquadCenter('GUARDS', width, height)],
@@ -219,7 +237,7 @@ function createRoundState(width: number, height: number): GameState {
 
   for (let index = 0; index < BALANCE.guardCount; index += 1) {
     const center = squadCenters.get('GUARDS') ?? layout.core;
-    const anchor = formationAnchor(center, 'GUARD', 'SPREAD', index);
+    const anchor = formationAnchor(center, 'GUARD', 'SPREAD', index, spatialScale);
     state.units.push({
       id: state.nextId++,
       kind: 'GUARD',
@@ -237,7 +255,7 @@ function createRoundState(width: number, height: number): GameState {
 
   for (let index = 0; index < BALANCE.harvesterCount; index += 1) {
     const center = squadCenters.get('HARVESTERS') ?? layout.core;
-    const anchor = formationAnchor(center, 'HARVESTER', 'SPREAD', index);
+    const anchor = formationAnchor(center, 'HARVESTER', 'SPREAD', index, spatialScale);
     state.units.push({
       id: state.nextId++,
       kind: 'HARVESTER',
@@ -256,7 +274,7 @@ function createRoundState(width: number, height: number): GameState {
   const harvesterCenter = squadCenters.get('HARVESTERS');
   for (let index = 0; index < BALANCE.initialDepositCount; index += 1) {
     spawnDeposit(state, index === 0 && harvesterCenter
-      ? { center: harvesterCenter, radius: activityRadius('SPREAD') }
+      ? { center: harvesterCenter, radius: activityRadius('SPREAD', spatialScale) }
       : undefined);
   }
   return state;
@@ -550,8 +568,9 @@ class SwarmfallGame {
     const harvesterCenter = this.state.squadCenters.get('HARVESTERS') ?? this.state.core;
     const guardMode = this.state.formations.get('GUARDS') ?? 'SPREAD';
     const harvesterMode = this.state.formations.get('HARVESTERS') ?? 'SPREAD';
-    const guardActivityRadius = activityRadius(guardMode);
-    const harvesterActivityRadius = activityRadius(harvesterMode);
+    const spatialScale = squadSpatialScale(this.state.width, this.state.height);
+    const guardActivityRadius = activityRadius(guardMode, spatialScale);
+    const harvesterActivityRadius = activityRadius(harvesterMode, spatialScale);
     const loadedMiners = this.state.units.filter(
       (unit) => unit.kind === 'HARVESTER' && (unit.returning || unit.cargo >= BALANCE.harvesterCargoCapacity),
     );
@@ -657,11 +676,12 @@ class SwarmfallGame {
       const squad = squadForKind(unit.kind);
       const center = this.state.squadCenters.get(squad) ?? this.state.core;
       const mode = this.state.formations.get(squad) ?? 'SPREAD';
+      const spatialScale = squadSpatialScale(this.state.width, this.state.height);
       const underDirectionalControl = this.movementDirection !== null && squad === this.selectedSquad;
       const escortTarget = findUnit(this.state, unit.escortTargetUnitId);
       let idlePatrolling = false;
       if (underDirectionalControl) {
-        destination = formationAnchor(center, unit.kind, mode, unit.index);
+        destination = formationAnchor(center, unit.kind, mode, unit.index, spatialScale);
       } else if (unit.returning) {
         destination = this.state.core;
       } else if (escortTarget) {
@@ -676,7 +696,7 @@ class SwarmfallGame {
         if (target) destination = target.position;
         else {
           idlePatrolling = true;
-          destination = this.idleDestination(unit, center, mode, delta);
+          destination = this.idleDestination(unit, center, mode, delta, spatialScale);
         }
       }
 
@@ -718,9 +738,15 @@ class SwarmfallGame {
     }
   }
 
-  private idleDestination(unit: Unit, center: Point, mode: FormationMode, delta: number): Point {
-    const home = formationAnchor(center, unit.kind, mode, unit.index);
-    const patrolRadius = idlePatrolRadius(mode);
+  private idleDestination(
+    unit: Unit,
+    center: Point,
+    mode: FormationMode,
+    delta: number,
+    spatialScale: number,
+  ): Point {
+    const home = formationAnchor(center, unit.kind, mode, unit.index, spatialScale);
+    const patrolRadius = idlePatrolRadius(mode, spatialScale);
     if (unit.idleTarget && distance(unit.idleTarget, home) > patrolRadius + BALANCE.idleWaypointReachRadius) {
       unit.idleTarget = undefined;
       unit.idlePause = 0;
@@ -745,7 +771,7 @@ class SwarmfallGame {
     };
     const fromCenter = { x: candidate.x - center.x, y: candidate.y - center.y };
     const fromCenterDistance = Math.hypot(fromCenter.x, fromCenter.y);
-    const maxActivityDistance = activityRadius(mode) - BALANCE.unitRadius;
+    const maxActivityDistance = activityRadius(mode, spatialScale) - BALANCE.unitRadius;
     if (fromCenterDistance > maxActivityDistance) {
       candidate.x = center.x + (fromCenter.x / fromCenterDistance) * maxActivityDistance;
       candidate.y = center.y + (fromCenter.y / fromCenterDistance) * maxActivityDistance;
@@ -905,10 +931,11 @@ class SwarmfallGame {
   }
 
   private drawActivityZones(): void {
+    const spatialScale = squadSpatialScale(this.state.width, this.state.height);
     for (const [squad, center] of this.state.squadCenters) {
       const active = squad === this.selectedSquad;
       const mode = this.state.formations.get(squad) ?? 'SPREAD';
-      const radius = activityRadius(mode);
+      const radius = activityRadius(mode, spatialScale);
       const color = squad === 'GUARDS' ? '#ff815b' : '#61d7d7';
       const context = this.context;
       context.save();

@@ -11,6 +11,8 @@ export const BALANCE = {
   squadCommandSpeed: 62,
   squadActivityGatherRadius: 125,
   squadActivitySpreadRadius: 190,
+  squadSpatialReferenceSize: 640,
+  squadSpatialMinScale: 0.6,
   squadActivityEdgePadding: 26,
   movementIndicatorLength: 58,
   movementIndicatorArrowSize: 9,
