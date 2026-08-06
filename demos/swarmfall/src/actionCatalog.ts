@@ -42,4 +42,22 @@ export const SWARMFALL_ACTION_CATALOG = [
     defaultSource: InputSourceId.TOUCH_DIRECTION,
     remappable: true,
   },
+  {
+    id: 'TOGGLE_MINER_PROTECT',
+    label: 'Miner Protect',
+    description: 'Toggle the Miner Protect tactic.',
+    context: 'GAMEPLAY',
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
+    defaultSource: InputSourceId.TOUCH_BUTTON,
+    remappable: true,
+  },
+  {
+    id: 'TOGGLE_GUARD_ESCORT',
+    label: 'Guard Escort',
+    description: 'Toggle the Guard Escort tactic.',
+    context: 'GAMEPLAY',
+    requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
+    defaultSource: InputSourceId.TOUCH_BUTTON,
+    remappable: true,
+  },
 ] as const satisfies readonly SettingsActionDefinition<ActionPayloadMap>[];

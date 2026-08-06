@@ -23,7 +23,13 @@ import {
   type VisionStatus,
 } from '../../../packages/adaptive-input/src/index.ts';
 import { SWARMFALL_ACTION_CATALOG } from './actionCatalog.ts';
-import type { ActionPayloadMap, GameAction, GameActionBus } from './actionBus.ts';
+import {
+  TRIGGER_GAME_ACTIONS,
+  type ActionPayloadMap,
+  type GameAction,
+  type GameActionBus,
+  type TriggerGameAction,
+} from './actionBus.ts';
 
 const AVAILABLE_INPUTS = [
   { id: InputSourceId.TOUCH_BUTTON, label: 'Touch button', tasks: ['TRIGGER'], scope: 'TARGETED', requiresCamera: false },
@@ -34,7 +40,6 @@ const AVAILABLE_INPUTS = [
   { id: InputSourceId.HAND_POINT_DIRECTION, label: 'Point direction', tasks: ['DIRECTION'], scope: 'GLOBAL', requiresCamera: true },
 ] as const satisfies readonly InputSourceDefinition[];
 
-const TRIGGER_ACTIONS = ['GATHER_UNITS', 'SPREAD_UNITS', 'TOGGLE_SQUAD'] as const;
 const BINDING_STORAGE_KEY = 'teamfreegpt.swarmfall.bindings.v1';
 const GESTURE_SCHEME: Partial<Record<GameAction, InputSourceId>> = {
   GATHER_UNITS: InputSourceId.HAND_CLOSED_FIST,
@@ -104,6 +109,8 @@ export class SwarmfallAdaptiveInput {
     this.adaptive.on('GATHER_UNITS', (payload) => gameBus.emit('GATHER_UNITS', payload));
     this.adaptive.on('SPREAD_UNITS', (payload) => gameBus.emit('SPREAD_UNITS', payload));
     this.adaptive.on('TOGGLE_SQUAD', (payload) => gameBus.emit('TOGGLE_SQUAD', payload));
+    this.adaptive.on('TOGGLE_MINER_PROTECT', (payload) => gameBus.emit('TOGGLE_MINER_PROTECT', payload));
+    this.adaptive.on('TOGGLE_GUARD_ESCORT', (payload) => gameBus.emit('TOGGLE_GUARD_ESCORT', payload));
     this.adaptive.on('DIRECT_UNITS', (payload) => gameBus.emit('DIRECT_UNITS', payload));
     this.adaptive.bindings.onChange(() => this.refreshSettings());
 
@@ -153,7 +160,7 @@ export class SwarmfallAdaptiveInput {
     this.callbacks.onDeviceSettingsChanged(this.visionDevice.view());
   }
 
-  attemptTouchAction(action: typeof TRIGGER_ACTIONS[number]): void {
+  attemptTouchAction(action: TriggerGameAction): void {
     this.emitTriggerFor(action, { kind: 'trigger', source: InputSourceId.TOUCH_BUTTON, timestamp: performance.now(), phase: 'gameplay' });
   }
 
@@ -317,7 +324,10 @@ export class SwarmfallAdaptiveInput {
 
   private controlScheme(): SwarmfallBindingSettingsView['controlScheme'] {
     const actions = this.settings.actions();
-    const gesture = actions.every((action) => GESTURE_SCHEME[action.id] === action.currentSource);
+    const gesture = actions.every((action) => {
+      const gestureSource = GESTURE_SCHEME[action.id];
+      return action.currentSource === (gestureSource ?? action.defaultSource);
+    });
     if (gesture) return 'GESTURE';
     const touch = actions.every((action) => action.currentSource === action.defaultSource);
     return touch ? 'TOUCH' : 'CUSTOM';
@@ -395,7 +405,7 @@ export class SwarmfallAdaptiveInput {
 
   private handleVisionSignal(signal: InputSignal): void {
     if (signal.kind === 'trigger') {
-      const action = TRIGGER_ACTIONS.find((candidate) =>
+      const action = TRIGGER_GAME_ACTIONS.find((candidate) =>
         this.adaptive.bindings.isBound(candidate, signal.source),
       );
       if (action) this.emitTriggerFor(action, signal);
@@ -406,7 +416,7 @@ export class SwarmfallAdaptiveInput {
     }
   }
 
-  private emitTriggerFor(action: typeof TRIGGER_ACTIONS[number], signal: TriggerInputSignal): void {
+  private emitTriggerFor(action: TriggerGameAction, signal: TriggerInputSignal): void {
     const accepted = this.adaptive.emitFrom(action, {}, signal);
     if (!accepted && signal.source === InputSourceId.TOUCH_BUTTON) return;
     const descriptor = SWARMFALL_ACTION_CATALOG.find((item) => item.id === action);

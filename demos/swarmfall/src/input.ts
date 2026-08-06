@@ -2,12 +2,15 @@ import {
   VISION_INFERENCE_FPS_OPTIONS,
   type VisionInferenceFps,
 } from '../../../packages/adaptive-input/src/index.ts';
-import type { GameActionBus } from './actionBus.ts';
+import {
+  TRIGGER_GAME_ACTIONS,
+  type GameActionBus,
+  type TriggerGameAction,
+} from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
-import type { StrategyId } from './strategy.ts';
 
 export interface AdaptiveUiActions {
-  attemptTouchAction(action: 'GATHER_UNITS' | 'SPREAD_UNITS' | 'TOGGLE_SQUAD'): void;
+  attemptTouchAction(action: TriggerGameAction): void;
   attemptTouchDirection(direction: { x: number; y: number } | null): void;
   openSettings(): void;
   closeSettings(): void;
@@ -32,6 +35,11 @@ interface PointerPosition {
 function readCameraFps(value: string | undefined): VisionInferenceFps | null {
   if (value === undefined) return null;
   return VISION_INFERENCE_FPS_OPTIONS.find((fps) => String(fps) === value) ?? null;
+}
+
+function readTriggerGameAction(value: string | undefined): TriggerGameAction | null {
+  if (value === undefined) return null;
+  return TRIGGER_GAME_ACTIONS.find((action) => action === value) ?? null;
 }
 
 function pointerPosition(event: PointerEvent): PointerPosition {
@@ -96,15 +104,15 @@ export function wireUiInput(
     const eventTarget = event.target;
     if (!(eventTarget instanceof HTMLElement)) return;
     const target = eventTarget.closest<HTMLElement>(
-      '[data-strategy], [data-action], [data-binding-action], [data-input-source], [data-camera-fps]',
+      '[data-game-action], [data-action], [data-binding-action], [data-input-source], [data-camera-fps]',
     );
     if (!target) return;
 
     const cameraFps = readCameraFps(target.dataset.cameraFps);
     if (cameraFps !== null) adaptive.selectCameraSpeed(cameraFps);
 
-    const strategyId = target.dataset.strategy as StrategyId | undefined;
-    if (strategyId) bus.emit('SELECT_STRATEGY', { strategyId });
+    const triggerAction = readTriggerGameAction(target.dataset.gameAction);
+    if (triggerAction) adaptive.attemptTouchAction(triggerAction);
 
     if (target.dataset.bindingAction) {
       adaptive.selectSettingsAction(target.dataset.bindingAction);

@@ -882,7 +882,7 @@ export default function CalibrationClient() {
                 </button>
               </div>
               <div className="rapid-results" aria-label="Rapid gesture results">
-                {RAPID_GESTURE_STABILITY_STEPS_MS.map((stabilityMs) => {
+                {[...RAPID_GESTURE_STABILITY_STEPS_MS].reverse().map((stabilityMs) => {
                   const result = rapidResults.find((candidate) => candidate.stabilityMs === stabilityMs);
                   const state = !result
                     ? 'pending'

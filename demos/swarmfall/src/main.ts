@@ -480,18 +480,21 @@ class SwarmfallGame {
         ? nextDirection
         : null;
     });
-    this.bus.on('SELECT_STRATEGY', ({ strategyId }) => {
-      if (this.activeStrategy === strategyId) {
-        this.activeStrategy = null;
-        this.showToast('Normal squad jobs active');
-      } else {
-        this.activeStrategy = strategyId;
-        this.showToast(`Strategy active: ${getStrategy(strategyId).label}`);
-      }
-      this.updateUi(true);
-    });
+    this.bus.on('TOGGLE_MINER_PROTECT', () => this.toggleStrategy('MINER_PROTECT'));
+    this.bus.on('TOGGLE_GUARD_ESCORT', () => this.toggleStrategy('ESCORT'));
     this.bus.on('BEGIN_ROUND', () => this.beginRound());
     this.bus.on('RESTART_ROUND', () => this.resetToIntro());
+  }
+
+  private toggleStrategy(strategyId: StrategyId): void {
+    if (this.activeStrategy === strategyId) {
+      this.activeStrategy = null;
+      this.showToast('Normal squad jobs active');
+    } else {
+      this.activeStrategy = strategyId;
+      this.showToast(`Strategy active: ${getStrategy(strategyId).label}`);
+    }
+    this.updateUi(true);
   }
 
   private beginRound(): void {
@@ -1193,7 +1196,7 @@ function createUi(root: HTMLElement): UiRefs {
           <p class="panel-copy">Drag the arena to direct units.</p>
           <h2 class="panel-title">Optional tactics</h2>
           <div class="strategy-list">
-            ${STRATEGIES.map((strategy) => `<button class="strategy" type="button" data-strategy="${strategy.id}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
+            ${STRATEGIES.map((strategy) => `<button class="strategy" type="button" data-strategy="${strategy.id}" data-game-action="${strategy.action}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
           </div>
           <div class="active-strategy"><span class="label">Active tactic</span><strong id="active-strategy">Normal jobs</strong><span class="microcopy" id="strategy-hint">Optional</span></div>
         </aside>
@@ -1377,6 +1380,18 @@ function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): 
   );
 
   const preview = view.preview;
+  const conflictReversions = preview?.conflicts.map((conflict) => {
+    const action = view.actions.find((candidate) => candidate.id === conflict.action);
+    const defaultLabel = view.sources.find((source) => source.id === action?.defaultSource)?.label
+      ?? 'default input';
+    return `${conflict.label} to ${defaultLabel}`;
+  }) ?? [];
+  const conflictNotice = preview && conflictReversions.length > 0
+    ? ` To use ${preview.toLabel} here, restore ${conflictReversions.join(' and ')}.`
+    : '';
+  const conflictButton = preview && preview.conflicts.length > 0
+    ? `Restore ${preview.conflicts.map((conflict) => conflict.label).join(' and ')} and use ${preview.toLabel}`
+    : null;
   ui.settingsComparison.replaceChildren();
   ui.settingsComparison.hidden = true;
   ui.settingsTest.hidden = true;
@@ -1396,30 +1411,27 @@ function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): 
         view.sources.find((candidate) => candidate.id === source)?.label ?? source,
       );
       ui.settingsRecommendation.textContent =
-        `Test ${missingLabels.join(' and ')} for performance evidence, or continue without testing.`;
+        `Test ${missingLabels.join(' and ')} for performance evidence, or continue without testing.${conflictNotice}`;
       ui.settingsTest.textContent = 'Optional input test';
       ui.settingsConfirm.hidden = false;
-      ui.settingsConfirm.textContent = `Use ${preview.toLabel} without testing`;
+      ui.settingsConfirm.textContent = conflictButton
+        ? `${conflictButton} without testing`
+        : `Use ${preview.toLabel} without testing`;
     } else if (view.stage === 'PREPARE') {
       ui.settingsRecommendation.textContent =
-        `Saved results are available from ${formatSavedResultDate(preview)}. Review them or test again.`;
+        `Saved results are available from ${formatSavedResultDate(preview)}. Review them or test again.${conflictNotice}`;
       ui.settingsTest.textContent = 'Test again';
       ui.settingsReview.hidden = false;
       ui.settingsConfirm.hidden = false;
-      ui.settingsConfirm.textContent = `Use ${preview.toLabel} now`;
+      ui.settingsConfirm.textContent = conflictButton ?? `Use ${preview.toLabel} now`;
     } else {
-      const conflict = preview.conflicts.length > 0
-        ? ` It will replace ${preview.conflicts.map((item) => item.label).join(', ')} in this context.`
-        : '';
       ui.settingsRecommendation.textContent =
-        `${recommendationLabel(preview.recommendation.verdict)}: ${preview.recommendation.explanation}${conflict}`;
+        `${recommendationLabel(preview.recommendation.verdict)}: ${preview.recommendation.explanation}${conflictNotice}`;
       renderComparison(ui.settingsComparison, preview);
       ui.settingsComparison.hidden = false;
       ui.settingsTest.textContent = 'Test again';
       ui.settingsConfirm.hidden = false;
-      ui.settingsConfirm.textContent = preview.conflicts.length > 0
-        ? `Replace and use ${preview.toLabel}`
-        : `Use ${preview.toLabel}`;
+      ui.settingsConfirm.textContent = conflictButton ?? `Use ${preview.toLabel}`;
     }
   }
 

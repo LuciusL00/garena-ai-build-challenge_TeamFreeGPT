@@ -1,3 +1,5 @@
+import type { StrategyAction } from './actionBus.ts';
+
 export type StrategyId = 'MINER_PROTECT' | 'ESCORT';
 
 export type GuardPolicy = 'INTERCEPT_THREATS' | 'ESCORT_LOADED_MINER';
@@ -5,6 +7,7 @@ export type HarvesterPolicy = 'MINE_AND_BANK' | 'PROTECT_LOADED_MINER';
 
 export interface StrategyDefinition {
   id: StrategyId;
+  action: StrategyAction;
   label: string;
   description: string;
   guardPolicy: GuardPolicy;
@@ -14,6 +17,7 @@ export interface StrategyDefinition {
 export const STRATEGIES: readonly StrategyDefinition[] = [
   {
     id: 'MINER_PROTECT',
+    action: 'TOGGLE_MINER_PROTECT',
     label: 'Miner Protect',
     description: 'Empty miners escort loaded miners home.',
     guardPolicy: 'INTERCEPT_THREATS',
@@ -21,6 +25,7 @@ export const STRATEGIES: readonly StrategyDefinition[] = [
   },
   {
     id: 'ESCORT',
+    action: 'TOGGLE_GUARD_ESCORT',
     label: 'Guard Escort',
     description: 'A guard escorts each loaded miner.',
     guardPolicy: 'ESCORT_LOADED_MINER',

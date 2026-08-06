@@ -1,15 +1,22 @@
 import type { Point } from './ui/layout.ts';
-import type { StrategyId } from './strategy.ts';
 
 export type Squad = 'GUARDS' | 'HARVESTERS';
 
+export const TRIGGER_GAME_ACTIONS = [
+  'TOGGLE_SQUAD',
+  'GATHER_UNITS',
+  'SPREAD_UNITS',
+  'TOGGLE_MINER_PROTECT',
+  'TOGGLE_GUARD_ESCORT',
+] as const;
+
+export type TriggerGameAction = typeof TRIGGER_GAME_ACTIONS[number];
+export type StrategyAction = 'TOGGLE_MINER_PROTECT' | 'TOGGLE_GUARD_ESCORT';
+
 export type GameAction =
   | 'SELECT_SQUAD'
-  | 'TOGGLE_SQUAD'
-  | 'GATHER_UNITS'
-  | 'SPREAD_UNITS'
+  | TriggerGameAction
   | 'DIRECT_UNITS'
-  | 'SELECT_STRATEGY'
   | 'BEGIN_ROUND'
   | 'RESTART_ROUND';
 
@@ -18,8 +25,9 @@ export interface ActionPayloadMap {
   TOGGLE_SQUAD: Record<string, never>;
   GATHER_UNITS: Record<string, never>;
   SPREAD_UNITS: Record<string, never>;
+  TOGGLE_MINER_PROTECT: Record<string, never>;
+  TOGGLE_GUARD_ESCORT: Record<string, never>;
   DIRECT_UNITS: { direction: Point | null };
-  SELECT_STRATEGY: { strategyId: StrategyId };
   BEGIN_ROUND: Record<string, never>;
   RESTART_ROUND: Record<string, never>;
 }
