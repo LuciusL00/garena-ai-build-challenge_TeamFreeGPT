@@ -12,6 +12,8 @@ import {
   InputChannelId,
   InputSourceId,
   PointDirectionTracker,
+  RAPID_GESTURE_STABILITY_STEPS_MS,
+  RapidGestureTuner,
   VisionDeviceSettings,
   VisionInputChannel,
   compareChannelScores,
@@ -19,7 +21,6 @@ import {
   DEFAULT_POINT_STABILITY_MS,
   highestConfidenceGestureCommand,
   recommendPointStabilityMs,
-  recommendRapidGestureStabilityMs,
   recommendVisionInferenceFps,
   scoreCalibration,
 } from '../index.ts';
@@ -733,40 +734,64 @@ async function main(): Promise<void> {
   perPoseGate.update(1_120, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
   check('another pose keeps the default hold time', perPoseActivations.length === 1);
 
-  const completeRapidRun = [320, 280, 240, 200, 160, 120].map((stabilityMs) => ({
-    stabilityMs,
-    cueDetected: true,
-    neutralRecovered: true,
-    accidentalActivation: false,
-  }));
+  /** Drives a tuner with a scripted pass/fail per cue and reports what it asked for. */
+  function runTuner(
+    outcome: (stabilityMs: number, seen: number) => boolean,
+    confirmations = 5,
+  ): { recommendation: number | null; cues: number[] } {
+    const tuner = new RapidGestureTuner(confirmations);
+    const cues: number[] = [];
+    const seenCount = new Map<number, number>();
+    while (tuner.pendingStabilityMs !== null && cues.length < 60) {
+      const stabilityMs = tuner.pendingStabilityMs;
+      const seen = (seenCount.get(stabilityMs) ?? 0) + 1;
+      seenCount.set(stabilityMs, seen);
+      cues.push(stabilityMs);
+      tuner.record(outcome(stabilityMs, seen));
+    }
+    return { recommendation: tuner.recommendation, cues };
+  }
+
+  const flawless = runTuner(() => true);
   check(
-    'rapid tuner recommends the shortest setting only when every cue passes',
-    recommendRapidGestureStabilityMs(completeRapidRun) === 120,
+    'a flawless run reaches the fastest hold and confirms it five times',
+    flawless.recommendation === 120 &&
+      flawless.cues.filter((stabilityMs) => stabilityMs === 120).length === 6,
   );
   check(
-    'rapid tuner stops at the first failed cue even if a later cue passes',
-    recommendRapidGestureStabilityMs(
-      completeRapidRun.map((result) => result.stabilityMs === 200
-        ? { ...result, cueDetected: false }
-        : result),
-    ) === 240,
+    'the staircase is not accepted on one descent alone',
+    flawless.cues.length === RAPID_GESTURE_STABILITY_STEPS_MS.length + 5,
+  );
+  const brokeAt200 = runTuner((stabilityMs) => stabilityMs !== 200);
+  check(
+    'a failed step confirms the last hold that worked instead of ending there',
+    brokeAt200.recommendation === 240 &&
+      brokeAt200.cues.filter((stabilityMs) => stabilityMs === 240).length === 6,
+  );
+  let unstableFastRuns = 0;
+  const unstableFast = runTuner((stabilityMs) => {
+    if (stabilityMs !== 120) return true;
+    unstableFastRuns += 1;
+    // Passes the descent, then fails its third confirmation.
+    return unstableFastRuns !== 4;
+  });
+  check(
+    'a hold that only worked once steps back to the next slower hold',
+    unstableFast.recommendation === 160,
   );
   check(
-    'rapid tuner refuses a hold time that also fired while the hand relaxed',
-    recommendRapidGestureStabilityMs(
-      completeRapidRun.map((result) => result.stabilityMs === 160
-        ? { ...result, accidentalActivation: true }
-        : result),
-    ) === 200,
+    'stepping back restarts confirmation from zero',
+    unstableFast.cues.filter((stabilityMs) => stabilityMs === 160).length === 6,
   );
   check(
-    'rapid tuner saves nothing when even the longest hold failed',
-    recommendRapidGestureStabilityMs(
-      completeRapidRun.map((result) => result.stabilityMs === 320
-        ? { ...result, cueDetected: false }
-        : result),
-    ) === null,
+    'nothing is saved when the slowest hold cannot be confirmed',
+    runTuner((stabilityMs) => stabilityMs === 320 ? false : true).recommendation === null,
   );
+  check(
+    'a hold that never survives repetition falls back through every step to nothing',
+    runTuner((_stabilityMs, seen) => seen === 1).recommendation === null,
+  );
+  checkThrows('a tuner cannot be built without confirmations', () => new RapidGestureTuner(0));
 
   check(
     'frame-rate probe chooses the highest sustainable measured rate',

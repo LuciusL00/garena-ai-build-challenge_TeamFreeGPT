@@ -15,6 +15,7 @@ import {
   DEFAULT_GESTURE_COMMAND_CONFIG,
   DEFAULT_VISION_TUNING_PREFERENCES,
   RAPID_GESTURE_STABILITY_STEPS_MS,
+  RapidGestureTuner,
   DirectionCalibrationHarness,
   DirectionSignalSource,
   InputSourceId,
@@ -24,7 +25,6 @@ import {
   VisionTuningStore,
   compareChannelScores,
   recommendPointStabilityMs,
-  recommendRapidGestureStabilityMs,
   scoreCalibration,
   scoreDirectionCalibration,
   type CalibrationTask,
@@ -446,39 +446,52 @@ export default function CalibrationClient() {
 
     const token = ++runTokenRef.current;
     const previousHoldMs = holdSliderMs;
-    const totalCueCount = RAPID_GESTURE_STABILITY_STEPS_MS.length;
+    const tuner = new RapidGestureTuner();
     changeTuningMode('GESTURE_HOLD');
     setRapidResults([]);
-    setProgress(`0 / ${totalCueCount}`);
+    setProgress('Step 1');
     setTuningDetail(
-      `Follow ${triggerCue(source)}, then RELAX, without pausing. The slider moves as each hold time is tried.`,
+      `Follow ${triggerCue(source)}, then RELAX, without pausing. The hold time drops step by step, then repeats the one it reaches ${tuner.confirmationsRequired} times.`,
     );
     setTestDetail('Response tuning is running. Follow the cue above; no score is recorded here.');
     vision.focusTriggerSource(source);
 
     const results: RapidGestureStepResult[] = [];
-    for (const stabilityMs of RAPID_GESTURE_STABILITY_STEPS_MS) {
+    while (tuner.pendingStabilityMs !== null) {
+      const stabilityMs = tuner.pendingStabilityMs;
+      const confirming = tuner.phase === 'CONFIRM';
+      setProgress(
+        confirming
+          ? `${stabilityMs} ms · ${tuner.confirmationsPassed + 1} of ${tuner.confirmationsRequired}`
+          : `Step ${results.length + 1}`,
+      );
       setHoldSliderMs(stabilityMs);
       setCue(triggerCue(source));
       const cueDetected = await observeHold(token, stabilityMs, RAPID_REACTION_WINDOW_MS);
       const relax = await observeRelax(token, stabilityMs, RAPID_RELAX_TIMEOUT_MS);
       if (token !== runTokenRef.current) return;
-      results.push({
+      const step: RapidGestureStepResult = {
         stabilityMs,
         cueDetected,
         neutralRecovered: relax.recovered,
         accidentalActivation: relax.accidentalActivation,
-      });
-      setRapidResults([...results]);
-      setProgress(`${results.length} / ${totalCueCount}`);
+      };
+      results.push(step);
+      if (!confirming) setRapidResults([...results]);
+      else if (!stepPassed(step)) {
+        setTuningDetail(
+          `${stabilityMs} ms failed a repeat, so it is not reliable enough. Falling back to a longer hold.`,
+        );
+      }
+      tuner.record(stepPassed(step));
     }
 
-    const recommendedMs = recommendRapidGestureStabilityMs(results);
+    const recommendedMs = tuner.recommendation;
     if (recommendedMs === null) {
       setHoldSliderMs(previousHoldMs);
       setCue('NO CHANGE');
       setTuningDetail(
-        `Even the longest hold did not pass, so ${previousHoldMs} ms was kept. Adjust the slider yourself, or run the test again.`,
+        `No hold time survived being repeated, so ${previousHoldMs} ms was kept. Adjust the slider yourself, or run the test again.`,
       );
     } else {
       const current = tuningStoreRef.current?.load() ?? visionTuning;
@@ -490,7 +503,7 @@ export default function CalibrationClient() {
       setHoldSliderMs(recommendedMs);
       setCue(`${recommendedMs} MS SAVED`);
       setTuningDetail(
-        `${recommendedMs} ms is the shortest hold that still detected every cue without activating while you relaxed.`,
+        `${recommendedMs} ms detected every cue and survived ${tuner.confirmationsRequired} repeats without firing while you relaxed.`,
       );
     }
     vision.focusTriggerSource(null);
@@ -1033,6 +1046,10 @@ function asVisionTriggerSource(source: InputSourceId): VisionTriggerSource | nul
 }
 
 /** Times raw pointing dropouts so a stability value can be recommended from them. */
+function stepPassed(step: RapidGestureStepResult): boolean {
+  return step.cueDetected && step.neutralRecovered && !step.accidentalActivation;
+}
+
 function collectPointGap(
   collector: PointGapCollector | null,
   shapeObserved: boolean,

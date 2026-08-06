@@ -155,12 +155,15 @@
   }
   .camera-panel .panel-title { margin-bottom: 8px; }
   .camera-panel .panel-title h2 { font-size: 15px; }
-  .camera-row { grid-template-columns: 100px 1fr; gap: 10px; }
-  .camera-frame { border-radius: 10px; }
+  /* The preview runs the full height of the readings beside it, so it ends level
+     with the camera buttons instead of leaving a gap under itself. */
+  .camera-row { grid-template-columns: 124px 1fr; gap: 12px; align-items: stretch; }
+  .camera-frame { aspect-ratio: auto; height: 100%; border-radius: 10px; }
   .camera-panel .reading-row { padding: 3px 0; font-size: 12px; }
   .camera-panel .confidence-track { margin: 6px 0; }
-  .camera-panel .button-row { margin-top: 6px; gap: 6px; }
-  .camera-panel .button-row button { flex: 1; min-height: 36px; padding: 6px; font-size: 12px; white-space: nowrap; }
+  /* One row: a wrapped second row would drag the stretched preview taller with it. */
+  .camera-panel .button-row { flex-wrap: nowrap; margin-top: 6px; gap: 6px; }
+  .camera-panel .button-row button { flex: 1; min-width: 0; min-height: 36px; padding: 6px 4px; font-size: 12px; white-space: nowrap; }
   .camera-panel > p { margin: 10px 0 0; font-size: 13px; }
   .camera-note { display: none; }
 

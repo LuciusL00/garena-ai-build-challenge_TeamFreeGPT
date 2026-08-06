@@ -34,24 +34,94 @@ export interface RapidGestureStepResult {
   readonly accidentalActivation: boolean;
 }
 
+export const RAPID_GESTURE_CONFIRMATIONS = 5;
+
+export type RapidGesturePhase = 'DESCEND' | 'CONFIRM' | 'DONE';
+
 /**
- * Picks the shortest safe prefix: the staircase runs from stable to fast, so the
- * recommendation is the last candidate before the first one that broke.
+ * Drives the hold-time staircase and its confirmation runs.
  *
- * Shorter hold times rarely fail to detect an intended cue — what they lose is
- * safety, so a candidate that would also have fired during a release is rejected.
+ * One pass down the steps is not evidence: the shortest hold nearly always
+ * detects a cue the player is deliberately making, so a single descent tends to
+ * reach the fastest step whatever the device does. Repeating the reached step
+ * several times is what separates a hold time that works from one that only
+ * worked once; a failure there steps back to the next slower hold and repeats.
  */
-export function recommendRapidGestureStabilityMs(
-  results: readonly RapidGestureStepResult[],
-): number | null {
-  let recommendation: number | null = null;
-  for (const stabilityMs of RAPID_GESTURE_STABILITY_STEPS_MS) {
-    const matches = results.filter((result) => result.stabilityMs === stabilityMs);
-    const step = matches.length === 1 ? matches[0] : undefined;
-    if (!step?.cueDetected || !step.neutralRecovered || step.accidentalActivation) break;
-    recommendation = stabilityMs;
+export class RapidGestureTuner {
+  private descendIndex = 0;
+  private candidateIndex: number | null = null;
+  private passedConfirmations = 0;
+  private phaseValue: RapidGesturePhase = 'DESCEND';
+  private result: number | null = null;
+
+  constructor(private readonly confirmations: number = RAPID_GESTURE_CONFIRMATIONS) {
+    if (!Number.isInteger(confirmations) || confirmations < 1) {
+      throw new RangeError('A tuner needs at least one confirmation run.');
+    }
   }
-  return recommendation;
+
+  get phase(): RapidGesturePhase {
+    return this.phaseValue;
+  }
+
+  /** The hold time the next cue should test, or null once the run is finished. */
+  get pendingStabilityMs(): number | null {
+    if (this.phaseValue === 'DONE') return null;
+    const index = this.phaseValue === 'DESCEND' ? this.descendIndex : this.candidateIndex;
+    return index === null ? null : RAPID_GESTURE_STABILITY_STEPS_MS[index] ?? null;
+  }
+
+  get confirmationsPassed(): number {
+    return this.passedConfirmations;
+  }
+
+  get confirmationsRequired(): number {
+    return this.confirmations;
+  }
+
+  get recommendation(): number | null {
+    return this.result;
+  }
+
+  record(passed: boolean): void {
+    if (this.phaseValue === 'DONE') return;
+    if (this.phaseValue === 'DESCEND') {
+      if (!passed) {
+        this.startConfirming();
+        return;
+      }
+      this.candidateIndex = this.descendIndex;
+      this.descendIndex += 1;
+      if (this.descendIndex >= RAPID_GESTURE_STABILITY_STEPS_MS.length) this.startConfirming();
+      return;
+    }
+    if (passed) {
+      this.passedConfirmations += 1;
+      if (this.passedConfirmations >= this.confirmations) {
+        this.result = this.candidateIndex === null
+          ? null
+          : RAPID_GESTURE_STABILITY_STEPS_MS[this.candidateIndex] ?? null;
+        this.phaseValue = 'DONE';
+      }
+      return;
+    }
+    // A confirmation failed: fall back to the next slower hold and start over.
+    this.passedConfirmations = 0;
+    this.candidateIndex = this.candidateIndex === null ? null : this.candidateIndex - 1;
+    if (this.candidateIndex === null || this.candidateIndex < 0) {
+      this.candidateIndex = null;
+      this.phaseValue = 'DONE';
+    }
+  }
+
+  private startConfirming(): void {
+    if (this.candidateIndex === null) {
+      this.phaseValue = 'DONE';
+      return;
+    }
+    this.phaseValue = 'CONFIRM';
+    this.passedConfirmations = 0;
+  }
 }
 
 /** Selects one command pose for one processed hand. Ties keep detector order. */
