@@ -103,6 +103,7 @@ export class SwarmfallAdaptiveInput {
     const visionTuning = new VisionTuningStore(window.localStorage).load();
     this.vision = new VisionInputChannel(video, {
       inferenceFps: visionTuning.inferenceFps,
+      pointStabilityMs: visionTuning.pointStabilityMs,
       gestureTiming: { stabilityMsBySource: visionTuning.gestureStabilityMs },
       onStatus: (status, detail) => {
         this.visionStatus = status;

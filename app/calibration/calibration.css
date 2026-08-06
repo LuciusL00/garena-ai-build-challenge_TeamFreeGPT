@@ -65,7 +65,9 @@
 .tuning-panel { margin-top: 18px; }
 .eyebrow { display: block; margin-bottom: 5px; color: var(--cyan); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
 .tuning-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.tuning-card { padding: 16px; border: 1px solid #1e3b4d; border-radius: 14px; background: #091620; }
+.tuning-card { margin-top: 14px; padding: 16px; border: 1px solid #1e3b4d; border-radius: 14px; background: #091620; }
+.tuning-card p { margin: 10px 0 0; font-size: 14px; }
+.response-tuning { border-color: #315064; }
 .tuning-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .tuning-heading span, .tuning-heading strong { display: block; }
 .tuning-heading span { margin-bottom: 4px; color: var(--muted); font-size: 12px; }

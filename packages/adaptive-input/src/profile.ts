@@ -3,6 +3,7 @@
 import type { CalibrationTask } from './actions.ts';
 import type { ChannelScore } from './recommendation/types.ts';
 import { InputChannelId, InputSourceId } from './sources.ts';
+import { DEFAULT_POINT_STABILITY_MS } from './vision/pointDirection.ts';
 
 const PROFILE_VERSION = 2;
 const DEFAULT_STORAGE_KEY = 'teamfreegpt.adaptive-input.profile.v2';
@@ -25,11 +26,14 @@ const VISION_TRIGGER_SOURCES: readonly VisionTriggerSource[] = [
 export interface VisionTuningPreferences {
   readonly inferenceFps: VisionInferenceFps;
   readonly gestureStabilityMs: Readonly<Partial<Record<VisionTriggerSource, number>>>;
+  /** Pointing has its own loss tolerance; it is continuous, not a held trigger. */
+  readonly pointStabilityMs: number;
 }
 
 export const DEFAULT_VISION_TUNING_PREFERENCES: VisionTuningPreferences = {
   inferenceFps: 15,
   gestureStabilityMs: {},
+  pointStabilityMs: DEFAULT_POINT_STABILITY_MS,
 };
 
 export interface CalibrationProfileSnapshot {
@@ -129,6 +133,7 @@ export class VisionTuningStore {
       version: VISION_TUNING_VERSION,
       inferenceFps: preferences.inferenceFps,
       gestureStabilityMs: preferences.gestureStabilityMs,
+      pointStabilityMs: preferences.pointStabilityMs,
     });
     this.storage.setItem(this.key, JSON.stringify({
       version: VISION_TUNING_VERSION,
@@ -166,17 +171,24 @@ function readVisionTuning(value: unknown): VisionTuningPreferences {
   const gestureStabilityMs: Partial<Record<VisionTriggerSource, number>> = {};
   VISION_TRIGGER_SOURCES.forEach((source) => {
     const duration = savedStability[source];
-    if (isFiniteNumber(duration) && duration >= 0 && duration <= 2_000) {
-      gestureStabilityMs[source] = duration;
-    }
+    if (isTuningDuration(duration)) gestureStabilityMs[source] = duration;
   });
-  return { inferenceFps: value.inferenceFps, gestureStabilityMs };
+  /** Records written before pointing gained its own setting keep the default. */
+  const pointStabilityMs = isTuningDuration(value.pointStabilityMs)
+    ? value.pointStabilityMs
+    : DEFAULT_POINT_STABILITY_MS;
+  return { inferenceFps: value.inferenceFps, gestureStabilityMs, pointStabilityMs };
+}
+
+function isTuningDuration(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0 && value <= 2_000;
 }
 
 function cloneVisionTuning(preferences: VisionTuningPreferences): VisionTuningPreferences {
   return {
     inferenceFps: preferences.inferenceFps,
     gestureStabilityMs: { ...preferences.gestureStabilityMs },
+    pointStabilityMs: preferences.pointStabilityMs,
   };
 }
 

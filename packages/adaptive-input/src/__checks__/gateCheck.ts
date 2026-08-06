@@ -15,7 +15,9 @@ import {
   VisionInputChannel,
   compareChannelScores,
   VisionTuningStore,
+  DEFAULT_POINT_STABILITY_MS,
   highestConfidenceGestureCommand,
+  recommendPointStabilityMs,
   recommendRapidGestureStabilityMs,
   recommendVisionInferenceFps,
   scoreCalibration,
@@ -327,6 +329,7 @@ async function main(): Promise<void> {
       [InputSourceId.HAND_CLOSED_FIST]: 160,
       [InputSourceId.HAND_OPEN_PALM]: 240,
     },
+    pointStabilityMs: 240,
   });
   const restoredTuning = tuningStorage.load();
   check('device frame-rate choice survives save and load', restoredTuning.inferenceFps === 12);
@@ -335,6 +338,19 @@ async function main(): Promise<void> {
     restoredTuning.gestureStabilityMs[InputSourceId.HAND_CLOSED_FIST] === 160 &&
       restoredTuning.gestureStabilityMs[InputSourceId.HAND_OPEN_PALM] === 240 &&
       restoredTuning.gestureStabilityMs[InputSourceId.HAND_THUMB_UP] === undefined,
+  );
+  check(
+    'pointing stability is stored apart from the trigger hold times',
+    restoredTuning.pointStabilityMs === 240,
+  );
+  const legacyTuningStorage = new MemoryProfileStorage();
+  legacyTuningStorage.setItem(
+    'teamfreegpt.adaptive-input.vision-tuning.v1',
+    JSON.stringify({ version: 1, inferenceFps: 10, gestureStabilityMs: {} }),
+  );
+  check(
+    'a record saved before pointing stability existed keeps the default',
+    new VisionTuningStore(legacyTuningStorage).load().pointStabilityMs === DEFAULT_POINT_STABILITY_MS,
   );
   console.log('\nRule-based recommendation');
   const recommender = new ControlRecommender();
@@ -699,6 +715,7 @@ async function main(): Promise<void> {
     stabilityMs,
     cueDetected: true,
     neutralRecovered: true,
+    accidentalActivation: false,
   }));
   check(
     'rapid tuner recommends the shortest setting only when every cue passes',
@@ -712,6 +729,15 @@ async function main(): Promise<void> {
         : result),
       { startPassed: true, endPassed: true },
     ) === 240,
+  );
+  check(
+    'rapid tuner refuses a hold time that also fired while the hand relaxed',
+    recommendRapidGestureStabilityMs(
+      completeRapidRun.map((result) => result.stabilityMs === 160
+        ? { ...result, accidentalActivation: true }
+        : result),
+      { startPassed: true, endPassed: true },
+    ) === 200,
   );
   check(
     'rapid tuner rejects a run when either slow bookend fails',
@@ -780,6 +806,59 @@ async function main(): Promise<void> {
   check(
     'looser hold angles cannot start a new pointing session',
     strictEntryTracker.update(pointLandmarks(10, 150, 140), 0) === null,
+  );
+
+  const competingTracker = new PointDirectionTracker();
+  competingTracker.update(pointLandmarks(0, 180, 90), 0);
+  check(
+    'a single competing gesture frame does not release pointing',
+    competingTracker.update(pointLandmarks(0, 180, 90), 67, true) !== null,
+  );
+  check(
+    'a competing gesture held to its confirmation does release pointing',
+    competingTracker.update(pointLandmarks(0, 180, 90), 267, true) === null,
+  );
+  const flickerTracker = new PointDirectionTracker();
+  flickerTracker.update(pointLandmarks(0, 180, 90), 0);
+  flickerTracker.update(pointLandmarks(0, 180, 90), 67, true);
+  flickerTracker.update(pointLandmarks(0, 180, 90), 134);
+  check(
+    'an interrupted competing gesture restarts its confirmation window',
+    flickerTracker.update(pointLandmarks(0, 180, 90), 267, true) !== null,
+  );
+
+  const unclearShapeTracker = new PointDirectionTracker();
+  unclearShapeTracker.update(pointLandmarks(0, 180, 90), 0);
+  check(
+    'a visible hand with an unclear shape outlasts the 180 ms loss grace',
+    unclearShapeTracker.update(pointLandmarks(0, 100, 90), 240) !== null,
+  );
+  check(
+    'an unclear shape still ends pointing after its own 300 ms grace',
+    unclearShapeTracker.update(pointLandmarks(0, 100, 90), 301) === null,
+  );
+
+  const tunedPointTracker = new PointDirectionTracker();
+  tunedPointTracker.setStabilityMs(120);
+  tunedPointTracker.update(pointLandmarks(0, 180, 90), 0);
+  check('raw shape observation is reported for gap measurement', tunedPointTracker.isShapeObserved);
+  check(
+    'a saved pointing stability shortens the loss grace',
+    tunedPointTracker.update([], 121) === null && !tunedPointTracker.isShapeObserved,
+  );
+
+  check(
+    'pointing stability recommendation covers the measured gaps',
+    recommendPointStabilityMs([80, 90, 150, 170]) === 180,
+  );
+  check(
+    'one isolated long gap does not force the slowest pointing setting',
+    recommendPointStabilityMs([60, 70, 80, 90, 95, 100, 110, 115, 120, 900]) === 120,
+  );
+  check('measuring no gaps recommends the shortest pointing setting', recommendPointStabilityMs([]) === 120);
+  check(
+    'gaps longer than every candidate fall back to the most tolerant setting',
+    recommendPointStabilityMs([500, 600]) === 360,
   );
 
   if (failures.length > 0) {

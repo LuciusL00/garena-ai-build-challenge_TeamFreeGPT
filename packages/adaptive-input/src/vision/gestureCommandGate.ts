@@ -30,9 +30,16 @@ export interface RapidGestureStepResult {
   readonly stabilityMs: number;
   readonly cueDetected: boolean;
   readonly neutralRecovered: boolean;
+  /** The candidate would also have fired while the hand was being relaxed. */
+  readonly accidentalActivation: boolean;
 }
 
-/** Picks the shortest safe prefix; every preceding cue and both bookends must pass. */
+/**
+ * Picks the shortest safe prefix; every preceding cue and both bookends must pass.
+ *
+ * Shorter hold times rarely fail to detect an intended cue — what they lose is
+ * safety, so a candidate that would also have fired during a release is rejected.
+ */
 export function recommendRapidGestureStabilityMs(
   results: readonly RapidGestureStepResult[],
   bookends: { readonly startPassed: boolean; readonly endPassed: boolean },
@@ -41,13 +48,8 @@ export function recommendRapidGestureStabilityMs(
   let recommendation: number | null = null;
   for (const stabilityMs of RAPID_GESTURE_STABILITY_STEPS_MS) {
     const matches = results.filter((result) => result.stabilityMs === stabilityMs);
-    if (
-      matches.length !== 1 ||
-      !matches[0]?.cueDetected ||
-      !matches[0].neutralRecovered
-    ) {
-      break;
-    }
+    const step = matches.length === 1 ? matches[0] : undefined;
+    if (!step?.cueDetected || !step.neutralRecovered || step.accidentalActivation) break;
     recommendation = stabilityMs;
   }
   return recommendation;

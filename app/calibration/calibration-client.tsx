@@ -18,11 +18,13 @@ import {
   DirectionCalibrationHarness,
   DirectionSignalSource,
   InputSourceId,
+  POINT_STABILITY_STEPS_MS,
   TriggerCalibrationSource,
   VisionInputChannel,
   VisionTuningStore,
   VISION_INFERENCE_FPS_OPTIONS,
   compareChannelScores,
+  recommendPointStabilityMs,
   recommendRapidGestureStabilityMs,
   recommendVisionInferenceFps,
   scoreCalibration,
@@ -74,7 +76,15 @@ const VISION_SOURCES = new Set<InputSourceId>([
 const FRAME_PROBE_WARMUP_MS = 300;
 const FRAME_PROBE_SAMPLE_MS = 1_200;
 const RAPID_BOOKEND_HOLD_MS = 360;
-const RAPID_WAIT_MS = 700;
+/** Time allowed to notice a cue and start the pose, before the hold clock starts. */
+const RAPID_REACTION_WINDOW_MS = 1_800;
+/** Extra room so one flickered frame inside a cue can be recovered from. */
+const RAPID_HOLD_ALLOWANCE_MS = 400;
+const RAPID_RELAX_TIMEOUT_MS = 2_000;
+const SAMPLE_POLL_MS = 16;
+const STALE_SAMPLE_MS = 250;
+/** Below this, a direction test saw too little camera data to advise on stability. */
+const POINT_SAMPLE_MINIMUM = 30;
 
 type TestMode = keyof typeof TEST_CONFIGS;
 type SupportedTask = Extract<CalibrationTask, 'TRIGGER' | 'DIRECTION'>;
@@ -90,6 +100,19 @@ interface DiagnosticSnapshot {
   readonly sequence: number;
   readonly capturedAt: number;
   readonly focusedConfidence: number;
+}
+
+/** Raw pointing dropouts measured during a direction test, before any grace period. */
+interface PointGapCollector {
+  lastObservedAt: number | null;
+  missing: boolean;
+  sampleCount: number;
+  readonly gapsMs: number[];
+}
+
+interface RelaxObservation {
+  readonly recovered: boolean;
+  readonly accidentalActivation: boolean;
 }
 
 type TuningMode = 'FRAME_RATE' | 'GESTURE_HOLD' | null;
@@ -116,6 +139,8 @@ export default function CalibrationClient() {
   const diagnosticRef = useRef<DiagnosticSnapshot | null>(null);
   const diagnosticSequenceRef = useRef(0);
   const frameSamplesRef = useRef<VisionTimingDiagnostic[] | null>(null);
+  const pointGapRef = useRef<PointGapCollector | null>(null);
+  const tuningModeRef = useRef<TuningMode>(null);
 
   const [selection, setSelection] = useState<CalibrationSelection>(DEFAULT_SELECTION);
   const [visionStatus, setVisionStatus] = useState<VisionStatus>('IDLE');
@@ -136,12 +161,21 @@ export default function CalibrationClient() {
   const [scores, setScores] = useState<readonly ChannelScore[]>([]);
   const [tuningMode, setTuningMode] = useState<TuningMode>(null);
   const [frameProbeResults, setFrameProbeResults] = useState<readonly VisionFrameRateProbeResult[]>([]);
+  const [frameProbeDetail, setFrameProbeDetail] = useState(
+    'One check per device. The chosen rate applies to every camera input.',
+  );
   const [rapidResults, setRapidResults] = useState<readonly RapidGestureStepResult[]>([]);
   const [tuningDetail, setTuningDetail] = useState(
-    'Check this device, then test how quickly the selected visual input can be recognized.',
+    'Follow the cue, then relax. The test lowers the hold time step by step and keeps the fastest one that stayed reliable.',
+  );
+  const [pointDetail, setPointDetail] = useState(
+    'Run the direction test to measure how often recognition drops, then this recommends the shortest stability that survives it.',
   );
   const [visionTuning, setVisionTuning] = useState(DEFAULT_VISION_TUNING_PREFERENCES);
   const [holdSliderMs, setHoldSliderMs] = useState(DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs);
+  const [pointSliderMs, setPointSliderMs] = useState(
+    DEFAULT_VISION_TUNING_PREFERENCES.pointStabilityMs,
+  );
   const [returnHref, setReturnHref] = useState('/');
   const [skipHref, setSkipHref] = useState('/?calibration=skipped');
 
@@ -158,6 +192,7 @@ export default function CalibrationClient() {
     tuningStoreRef.current = new VisionTuningStore(window.localStorage);
     const savedVisionTuning = tuningStoreRef.current.load();
     setVisionTuning(savedVisionTuning);
+    setPointSliderMs(savedVisionTuning.pointStabilityMs);
 
     const handleTouchAttempt = (event: PointerEvent): void => {
       if (activeTestRef.current !== InputSourceId.TOUCH_BUTTON) return;
@@ -175,18 +210,21 @@ export default function CalibrationClient() {
     if (video) {
       visionRef.current = new VisionInputChannel(video, {
         inferenceFps: savedVisionTuning.inferenceFps,
+        pointStabilityMs: savedVisionTuning.pointStabilityMs,
         gestureTiming: { stabilityMsBySource: savedVisionTuning.gestureStabilityMs },
         onStatus(status, detail) {
           setVisionStatus(status);
           setVisionDetail(detail);
         },
         onDiagnostic(diagnostic) {
+          const capturedAt = performance.now();
           diagnosticRef.current = {
             sequence: ++diagnosticSequenceRef.current,
-            capturedAt: performance.now(),
+            capturedAt,
             focusedConfidence: diagnostic.focusedCommandConfidence,
           };
           frameSamplesRef.current?.push(diagnostic.timing);
+          collectPointGap(pointGapRef.current, diagnostic.pointShapeObserved, capturedAt);
           setDetectedSource(diagnostic.detectedCommand);
           setDetectorState(diagnostic.commandState);
           setDetectorConfidence(diagnostic.commandConfidence);
@@ -199,6 +237,7 @@ export default function CalibrationClient() {
       window.removeEventListener('pointerdown', handleTouchAttempt, true);
       activeTestRef.current = null;
       frameSamplesRef.current = null;
+      pointGapRef.current = null;
       runTokenRef.current += 1;
       harnessRef.current.abort();
       directionHarnessRef.current.abort();
@@ -241,6 +280,10 @@ export default function CalibrationClient() {
           : selection.currentSource,
       )
     : null;
+  const pointTuningVisible = selection.task === 'DIRECTION' &&
+    (selection.currentSource === InputSourceId.HAND_POINT_DIRECTION ||
+      selection.alternativeSource === InputSourceId.HAND_POINT_DIRECTION);
+  const busy = activeTest !== null || tuningMode !== null;
 
   useEffect(() => {
     if (!tuningSource) return;
@@ -273,18 +316,26 @@ export default function CalibrationClient() {
     endTouchDirection();
     activeTestRef.current = null;
     frameSamplesRef.current = null;
+    pointGapRef.current = null;
     visionRef.current?.focusTriggerSource(null);
     runTokenRef.current += 1;
     harnessRef.current.abort();
     directionHarnessRef.current.abort();
     setActiveTest(null);
-    setTuningMode(null);
+    changeTuningMode(null);
     setCue('Stopped');
     setTestDetail('No partial score was saved.');
   };
 
+  const changeTuningMode = (mode: TuningMode): void => {
+    tuningModeRef.current = mode;
+    setTuningMode(mode);
+  };
+
+  const isBusy = (): boolean => activeTestRef.current !== null || tuningModeRef.current !== null;
+
   const chooseMode = (mode: TestMode): void => {
-    if (activeTestRef.current !== null) return;
+    if (isBusy()) return;
     setTestMode(mode);
     setProgress(`0 / ${TEST_CONFIGS[mode].trialCount}`);
     setTestDetail(
@@ -302,23 +353,19 @@ export default function CalibrationClient() {
   const runFrameRateCheck = async (): Promise<void> => {
     const vision = visionRef.current;
     if (!vision || visionStatus !== 'READY') {
-      setTuningDetail('Enable the camera and wait for Ready before checking this device.');
+      setFrameProbeDetail('Enable the camera and wait for Ready before checking this device.');
       return;
     }
-    if (activeTestRef.current !== null) return;
+    if (isBusy()) return;
 
     const token = ++runTokenRef.current;
     const originalFps = vision.requestedInferenceFps;
-    activeTestRef.current = tuningSource;
-    setActiveTest(tuningSource);
-    setTuningMode('FRAME_RATE');
+    changeTuningMode('FRAME_RATE');
     setFrameProbeResults([]);
-    setTuningDetail('Checking camera speed. Keep your hand visible and move it gently.');
     const results: VisionFrameRateProbeResult[] = [];
 
     for (const fps of VISION_INFERENCE_FPS_OPTIONS) {
-      setCue(`CHECKING ${fps} FPS`);
-      setProgress(`${results.length} / ${VISION_INFERENCE_FPS_OPTIONS.length}`);
+      setFrameProbeDetail(`Checking ${fps} FPS. Keep your hand visible and move it gently.`);
       vision.setInferenceFps(fps);
       await pause(FRAME_PROBE_WARMUP_MS);
       if (token !== runTokenRef.current) {
@@ -336,93 +383,98 @@ export default function CalibrationClient() {
       frameSamplesRef.current = null;
       results.push(result);
       setFrameProbeResults([...results]);
-      setProgress(`${results.length} / ${VISION_INFERENCE_FPS_OPTIONS.length}`);
     }
 
     const recommendedFps = recommendVisionInferenceFps(results);
-    const selectedFps = recommendedFps ?? originalFps;
-    vision.setInferenceFps(selectedFps);
+    vision.setInferenceFps(recommendedFps ?? originalFps);
     if (recommendedFps !== null) {
       const current = tuningStoreRef.current?.load() ?? visionTuning;
       persistVisionTuning({ ...current, inferenceFps: recommendedFps });
-      setCue(`${recommendedFps} FPS SAVED`);
-      setTuningDetail(
-        `${recommendedFps} FPS was the highest rate that kept up without using most of each frame budget.`,
+      setFrameProbeDetail(
+        `${recommendedFps} FPS saved. It was the highest rate that kept up without using most of each frame budget.`,
       );
     } else {
-      setCue('KEEPING CURRENT RATE');
-      setTuningDetail('No tested rate produced enough stable samples. Keep the current setting and try again.');
+      setFrameProbeDetail(
+        'No tested rate produced enough stable samples. The current setting was kept — try again with your hand in view.',
+      );
     }
-    activeTestRef.current = null;
-    setActiveTest(null);
-    setTuningMode(null);
+    changeTuningMode(null);
   };
 
-  const waitForFocusedConfidence = async (
+  /**
+   * Waits for one continuous hold of the focused pose. The hold clock starts at the
+   * first accepted frame, so a slow reaction to the cue can no longer fail the step.
+   */
+  const observeHold = async (
     token: number,
-    accepts: (confidence: number) => boolean,
-    stabilityMs: number,
-    timeoutMs: number,
+    holdMs: number,
+    reactionWindowMs: number,
   ): Promise<boolean> => {
-    const deadline = performance.now() + timeoutMs;
+    const deadline = performance.now() + reactionWindowMs + holdMs + RAPID_HOLD_ALLOWANCE_MS;
     let lastSequence = diagnosticRef.current?.sequence ?? 0;
-    let stableSince: number | null = null;
+    let heldSince: number | null = null;
     while (performance.now() < deadline) {
       if (token !== runTokenRef.current) return false;
-      await pause(16);
+      await pause(SAMPLE_POLL_MS);
       const sample = diagnosticRef.current;
       if (!sample || sample.sequence === lastSequence) continue;
       lastSequence = sample.sequence;
-      if (performance.now() - sample.capturedAt > 250 || !accepts(sample.focusedConfidence)) {
-        stableSince = null;
+      if (performance.now() - sample.capturedAt > STALE_SAMPLE_MS) continue;
+      if (sample.focusedConfidence < DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence) {
+        heldSince = null;
         continue;
       }
-      stableSince ??= sample.capturedAt;
-      if (sample.capturedAt - stableSince >= stabilityMs) return true;
+      const holdStartedAt = heldSince ?? sample.capturedAt;
+      heldSince = holdStartedAt;
+      if (sample.capturedAt - holdStartedAt >= holdMs) return true;
     }
     return false;
   };
 
-  const observeQuietBookend = async (token: number): Promise<boolean> => {
-    setCue('WAIT');
-    const noPose = await waitForFocusedConfidence(
-      token,
-      (confidence) => confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence,
-      RAPID_BOOKEND_HOLD_MS,
-      RAPID_WAIT_MS,
-    );
-    if (token !== runTokenRef.current) return false;
-    return !noPose && waitForFocusedConfidence(
-      token,
-      (confidence) => confidence <= DEFAULT_GESTURE_COMMAND_CONFIG.exitConfidence,
-      DEFAULT_GESTURE_COMMAND_CONFIG.neutralMs,
-      500,
-    );
-  };
-
-  const runGestureCue = async (
-    source: VisionTriggerSource,
+  /**
+   * Ends as soon as the hand is confirmed neutral, so the staircase never waits.
+   * Once the pose has been released, any fresh run long enough to satisfy this
+   * candidate counts as an accidental activation for it.
+   */
+  const observeRelax = async (
     token: number,
     stabilityMs: number,
     timeoutMs: number,
-  ): Promise<boolean> => {
-    setCue(triggerCue(source));
-    return waitForFocusedConfidence(
-      token,
-      (confidence) => confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence,
-      stabilityMs,
-      timeoutMs,
-    );
-  };
-
-  const recoverNeutral = async (token: number, timeoutMs: number): Promise<boolean> => {
+  ): Promise<RelaxObservation> => {
     setCue('RELAX');
-    return waitForFocusedConfidence(
-      token,
-      (confidence) => confidence <= DEFAULT_GESTURE_COMMAND_CONFIG.exitConfidence,
-      DEFAULT_GESTURE_COMMAND_CONFIG.neutralMs,
-      timeoutMs,
-    );
+    const deadline = performance.now() + timeoutMs;
+    let lastSequence = diagnosticRef.current?.sequence ?? 0;
+    let neutralSince: number | null = null;
+    let poseSince: number | null = null;
+    let released = false;
+    let accidentalActivation = false;
+    while (performance.now() < deadline) {
+      if (token !== runTokenRef.current) return { recovered: false, accidentalActivation };
+      await pause(SAMPLE_POLL_MS);
+      const sample = diagnosticRef.current;
+      if (!sample || sample.sequence === lastSequence) continue;
+      lastSequence = sample.sequence;
+      if (performance.now() - sample.capturedAt > STALE_SAMPLE_MS) continue;
+      const confidence = sample.focusedConfidence;
+      if (confidence < DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence) {
+        released = true;
+        poseSince = null;
+      } else if (released) {
+        const poseStartedAt = poseSince ?? sample.capturedAt;
+        poseSince = poseStartedAt;
+        if (sample.capturedAt - poseStartedAt >= stabilityMs) accidentalActivation = true;
+      }
+      if (confidence > DEFAULT_GESTURE_COMMAND_CONFIG.exitConfidence) {
+        neutralSince = null;
+        continue;
+      }
+      const neutralStartedAt = neutralSince ?? sample.capturedAt;
+      neutralSince = neutralStartedAt;
+      if (sample.capturedAt - neutralStartedAt >= DEFAULT_GESTURE_COMMAND_CONFIG.neutralMs) {
+        return { recovered: true, accidentalActivation };
+      }
+    }
+    return { recovered: false, accidentalActivation };
   };
 
   const runRapidGestureCheck = async (): Promise<void> => {
@@ -432,90 +484,109 @@ export default function CalibrationClient() {
       setTuningDetail('Enable the camera and wait for Ready before tuning a visual input.');
       return;
     }
-    if (activeTestRef.current !== null) return;
+    if (isBusy()) return;
 
     const token = ++runTokenRef.current;
+    const previousHoldMs = holdSliderMs;
     const totalCueCount = RAPID_GESTURE_STABILITY_STEPS_MS.length + 2;
-    activeTestRef.current = source;
-    setActiveTest(source);
-    setTuningMode('GESTURE_HOLD');
+    changeTuningMode('GESTURE_HOLD');
     setRapidResults([]);
     setProgress(`0 / ${totalCueCount}`);
     setTuningDetail(
-      `Follow ${triggerCue(source)} then RELAX. The middle sequence has no random wait.`,
+      `Follow ${triggerCue(source)}, then RELAX, without pausing. The slider moves as each hold time is tried.`,
     );
+    setTestDetail('Response tuning is running. Follow the cue above; no score is recorded here.');
     vision.focusTriggerSource(source);
 
-    const startQuiet = await observeQuietBookend(token);
-    const startCue = await runGestureCue(source, token, RAPID_BOOKEND_HOLD_MS, 1_400);
-    const startNeutral = await recoverNeutral(token, 900);
-    const startPassed = startQuiet && startCue && startNeutral;
+    setHoldSliderMs(RAPID_BOOKEND_HOLD_MS);
+    setCue(triggerCue(source));
+    const startCue = await observeHold(token, RAPID_BOOKEND_HOLD_MS, RAPID_REACTION_WINDOW_MS);
+    const startRelax = await observeRelax(token, RAPID_BOOKEND_HOLD_MS, RAPID_RELAX_TIMEOUT_MS);
+    if (token !== runTokenRef.current) return;
+    const startPassed = startCue && startRelax.recovered;
     setProgress(`1 / ${totalCueCount}`);
 
     const results: RapidGestureStepResult[] = [];
     for (const stabilityMs of RAPID_GESTURE_STABILITY_STEPS_MS) {
-      const cueDetected = await runGestureCue(
-        source,
-        token,
-        stabilityMs,
-        Math.max(470, stabilityMs + 350),
-      );
-      const neutralRecovered = await recoverNeutral(token, Math.max(450, stabilityMs + 250));
+      setHoldSliderMs(stabilityMs);
+      setCue(triggerCue(source));
+      const cueDetected = await observeHold(token, stabilityMs, RAPID_REACTION_WINDOW_MS);
+      const relax = await observeRelax(token, stabilityMs, RAPID_RELAX_TIMEOUT_MS);
       if (token !== runTokenRef.current) return;
-      results.push({ stabilityMs, cueDetected, neutralRecovered });
+      results.push({
+        stabilityMs,
+        cueDetected,
+        neutralRecovered: relax.recovered,
+        accidentalActivation: relax.accidentalActivation,
+      });
       setRapidResults([...results]);
       setProgress(`${results.length + 1} / ${totalCueCount}`);
     }
 
-    const endQuiet = await observeQuietBookend(token);
-    const endCue = await runGestureCue(source, token, RAPID_BOOKEND_HOLD_MS, 1_400);
-    const endNeutral = await recoverNeutral(token, 900);
+    setHoldSliderMs(RAPID_BOOKEND_HOLD_MS);
+    setCue(triggerCue(source));
+    const endCue = await observeHold(token, RAPID_BOOKEND_HOLD_MS, RAPID_REACTION_WINDOW_MS);
+    const endRelax = await observeRelax(token, RAPID_BOOKEND_HOLD_MS, RAPID_RELAX_TIMEOUT_MS);
     if (token !== runTokenRef.current) return;
-    const endPassed = endQuiet && endCue && endNeutral;
+    const endPassed = endCue && endRelax.recovered;
     setProgress(`${totalCueCount} / ${totalCueCount}`);
 
     const recommendedMs = recommendRapidGestureStabilityMs(results, { startPassed, endPassed });
     if (recommendedMs === null) {
-      setCue('NO CHANGE SAVED');
+      setHoldSliderMs(previousHoldMs);
+      setCue('NO CHANGE');
       setTuningDetail(
-        'A cue or slow bookend failed. Every earlier cue must pass, so the previous hold time was kept.',
+        `A cue or a slow check did not pass, so ${previousHoldMs} ms was kept. Adjust the slider yourself, or run the test again.`,
       );
     } else {
       const current = tuningStoreRef.current?.load() ?? visionTuning;
-      const next: VisionTuningPreferences = {
+      vision.setGestureStabilityMs(source, recommendedMs);
+      persistVisionTuning({
         ...current,
         gestureStabilityMs: { ...current.gestureStabilityMs, [source]: recommendedMs },
-      };
-      vision.setGestureStabilityMs(source, recommendedMs);
-      persistVisionTuning(next);
+      });
       setHoldSliderMs(recommendedMs);
       setCue(`${recommendedMs} MS SAVED`);
       setTuningDetail(
-        `${recommendedMs} ms is the shortest setting before the first failed cue. Both slow checks also passed.`,
+        `${recommendedMs} ms is the shortest hold that still detected every cue without activating while you relaxed.`,
       );
     }
     vision.focusTriggerSource(null);
-    activeTestRef.current = null;
-    setActiveTest(null);
-    setTuningMode(null);
+    setTestDetail('Response tuning finished. Run the activation test to compare this input with touch.');
+    changeTuningMode(null);
   };
 
   const saveHoldSlider = (): void => {
     const source = tuningSource;
     const vision = visionRef.current;
-    if (!source || !vision || activeTestRef.current !== null) return;
+    if (!source || !vision || isBusy()) return;
     const current = tuningStoreRef.current?.load() ?? visionTuning;
-    const next: VisionTuningPreferences = {
+    vision.setGestureStabilityMs(source, holdSliderMs);
+    persistVisionTuning({
       ...current,
       gestureStabilityMs: { ...current.gestureStabilityMs, [source]: holdSliderMs },
-    };
-    vision.setGestureStabilityMs(source, holdSliderMs);
-    persistVisionTuning(next);
+    });
     setTuningDetail(`${holdSliderMs} ms is now saved for ${sourceLabel(source)} on this device.`);
   };
 
+  const applyPointStability = (stabilityMs: number, detail: string): void => {
+    const current = tuningStoreRef.current?.load() ?? visionTuning;
+    visionRef.current?.setPointStabilityMs(stabilityMs);
+    persistVisionTuning({ ...current, pointStabilityMs: stabilityMs });
+    setPointSliderMs(stabilityMs);
+    setPointDetail(detail);
+  };
+
+  const savePointSlider = (): void => {
+    if (isBusy()) return;
+    applyPointStability(
+      pointSliderMs,
+      `${pointSliderMs} ms of pointing stability is now saved on this device.`,
+    );
+  };
+
   const calibrateSource = async (sourceId: InputSourceId): Promise<void> => {
-    if (activeTestRef.current !== null) return;
+    if (isBusy()) return;
     if (isVisionSource(sourceId) && visionStatus !== 'READY') {
       setTestDetail(`Enable the camera and wait for Ready before testing ${sourceLabel(sourceId)}.`);
       return;
@@ -525,6 +596,24 @@ export default function CalibrationClient() {
     } else {
       await calibrateDirection(sourceId);
     }
+  };
+
+  const recommendPointingStability = (): void => {
+    const collector = pointGapRef.current;
+    pointGapRef.current = null;
+    if (!collector) return;
+    if (collector.sampleCount < POINT_SAMPLE_MINIMUM) {
+      setPointDetail('Too few camera samples were seen to advise on pointing stability.');
+      return;
+    }
+    const recommended = recommendPointStabilityMs(collector.gapsMs);
+    const gapSummary = collector.gapsMs.length === 0
+      ? 'no recognition gaps'
+      : `${collector.gapsMs.length} recognition gap${collector.gapsMs.length === 1 ? '' : 's'} up to ${Math.round(Math.max(...collector.gapsMs))} ms`;
+    applyPointStability(
+      recommended,
+      `${recommended} ms saved. The direction test saw ${gapSummary}, and this is the shortest setting that covers them.`,
+    );
   };
 
   const calibrateTrigger = async (sourceId: InputSourceId): Promise<void> => {
@@ -602,6 +691,9 @@ export default function CalibrationClient() {
     setActiveTest(sourceId);
     setProgress(`0 / ${trialCount}`);
     setTestDetail(directionInstruction(sourceId));
+    pointGapRef.current = sourceId === InputSourceId.HAND_POINT_DIRECTION
+      ? { lastObservedAt: null, missing: false, sampleCount: 0, gapsMs: [] }
+      : null;
     const session = await directionHarnessRef.current.run(
       {
         sessionId: `${sourceId}-${Date.now()}`,
@@ -630,10 +722,12 @@ export default function CalibrationClient() {
     activeTestRef.current = null;
     setActiveTest(null);
     if (session.trials.length !== trialCount) {
+      pointGapRef.current = null;
       setCue('Incomplete');
       setTestDetail('No partial score was saved.');
       return;
     }
+    recommendPointingStability();
     saveScore(scoreDirectionCalibration(session));
     setCue('Saved');
     setTestDetail(
@@ -700,6 +794,7 @@ export default function CalibrationClient() {
           source={selection.currentSource}
           score={currentScore}
           active={activeTest === selection.currentSource}
+          busy={busy}
           onTest={() => void calibrateSource(selection.currentSource)}
         />
         <SourceCard
@@ -707,6 +802,7 @@ export default function CalibrationClient() {
           source={selection.alternativeSource}
           score={alternativeScore}
           active={activeTest === selection.alternativeSource}
+          busy={busy}
           onTest={() => void calibrateSource(selection.alternativeSource)}
         />
       </section>
@@ -739,6 +835,35 @@ export default function CalibrationClient() {
               <button data-calibration-control onClick={() => void startCamera()}>Enable camera</button>
               <button data-calibration-control onClick={() => visionRef.current?.stop()}>Stop camera</button>
             </div>
+            <article className="tuning-card">
+              <div className="tuning-heading">
+                <div>
+                  <span>Camera speed · this device</span>
+                  <strong>{visionTuning.inferenceFps} FPS in use</strong>
+                </div>
+                <button
+                  data-calibration-control
+                  disabled={busy || visionStatus !== 'READY'}
+                  onClick={() => void runFrameRateCheck()}
+                >
+                  {tuningMode === 'FRAME_RATE' ? 'Checking...' : 'Check camera speed'}
+                </button>
+              </div>
+              <p>{frameProbeDetail}</p>
+              <div className="probe-results">
+                {VISION_INFERENCE_FPS_OPTIONS.map((fps) => {
+                  const result = frameProbeResults.find((candidate) => candidate.requestedFps === fps);
+                  return (
+                    <span key={fps} className={result ? 'measured' : ''}>
+                      <strong>{fps} FPS</strong>
+                      {result
+                        ? `${result.effectiveFps.toFixed(1)} actual · ${result.medianInferenceDurationMs.toFixed(1)} ms work`
+                        : 'Not checked'}
+                    </span>
+                  );
+                })}
+              </div>
+            </article>
           </article>
         )}
 
@@ -754,7 +879,7 @@ export default function CalibrationClient() {
                   <button
                     data-calibration-control
                     className={testMode === mode ? 'selected' : ''}
-                    disabled={activeTest !== null}
+                    disabled={busy}
                     key={mode}
                     onClick={() => chooseMode(mode)}
                   >
@@ -770,7 +895,7 @@ export default function CalibrationClient() {
               )}
             </>
           )}
-          <div className={`test-cue ${activeTest ? 'active' : ''}`}>{cue}</div>
+          <div className={`test-cue ${busy ? 'active' : ''}`}>{cue}</div>
           <p>{testDetail}</p>
           {selection.task === 'TRIGGER' && activeTest === InputSourceId.TOUCH_BUTTON && (
             <button className="touch-action">Touch action</button>
@@ -789,6 +914,92 @@ export default function CalibrationClient() {
               <i />
             </div>
           )}
+          {tuningSource && (
+            <article className="tuning-card response-tuning">
+              <div className="tuning-heading">
+                <div>
+                  <span>Response tuning · {sourceLabel(tuningSource)}</span>
+                  <strong>{holdSliderMs} ms hold</strong>
+                </div>
+                <button
+                  data-calibration-control
+                  disabled={busy || visionStatus !== 'READY'}
+                  onClick={() => void runRapidGestureCheck()}
+                >
+                  {tuningMode === 'GESTURE_HOLD' ? 'Testing...' : 'Find response time'}
+                </button>
+              </div>
+              <p>{tuningDetail}</p>
+              <label className="hold-slider">
+                <span>Hold time before the gesture counts</span>
+                <input
+                  data-calibration-control
+                  type="range"
+                  min="120"
+                  max="360"
+                  step="40"
+                  value={holdSliderMs}
+                  disabled={busy}
+                  onChange={(event) => setHoldSliderMs(Number(event.currentTarget.value))}
+                />
+                <small>Stable</small>
+                <small>Fast</small>
+              </label>
+              <div className="button-row">
+                <button data-calibration-control disabled={busy} onClick={saveHoldSlider}>
+                  Save {holdSliderMs} ms
+                </button>
+              </div>
+              <div className="rapid-results" aria-label="Rapid gesture results">
+                {RAPID_GESTURE_STABILITY_STEPS_MS.map((stabilityMs) => {
+                  const result = rapidResults.find((candidate) => candidate.stabilityMs === stabilityMs);
+                  const state = !result
+                    ? 'pending'
+                    : result.cueDetected && result.neutralRecovered && !result.accidentalActivation
+                      ? 'passed'
+                      : 'failed';
+                  return <span className={state} key={stabilityMs}>{stabilityMs} ms</span>;
+                })}
+              </div>
+            </article>
+          )}
+
+          {pointTuningVisible && (
+            <article className="tuning-card response-tuning">
+              <div className="tuning-heading">
+                <div>
+                  <span>Pointing stability</span>
+                  <strong>{pointSliderMs} ms</strong>
+                </div>
+              </div>
+              <p>{pointDetail}</p>
+              <label className="hold-slider">
+                <span>How long pointing survives a recognition gap</span>
+                <input
+                  data-calibration-control
+                  type="range"
+                  min={POINT_STABILITY_STEPS_MS[0]}
+                  max={POINT_STABILITY_STEPS_MS[POINT_STABILITY_STEPS_MS.length - 1]}
+                  step="60"
+                  value={pointSliderMs}
+                  disabled={busy}
+                  onChange={(event) => setPointSliderMs(Number(event.currentTarget.value))}
+                />
+                <small>Stops sooner</small>
+                <small>Survives flicker</small>
+              </label>
+              <div className="button-row">
+                <button data-calibration-control disabled={busy} onClick={savePointSlider}>
+                  Save {pointSliderMs} ms
+                </button>
+              </div>
+              <small className="skip-note">
+                Pointing is continuous, so it has no hold time before it starts — this only
+                changes how long it waits before letting go.
+              </small>
+            </article>
+          )}
+
           <div className="button-row test-actions">
             <button data-calibration-control onClick={stopTest}>Stop test</button>
             <a className="skip-calibration" href={skipHref} data-calibration-control>
@@ -800,99 +1011,6 @@ export default function CalibrationClient() {
           </small>
         </article>
       </section>
-
-      {tuningSource && (
-        <section className="lab-panel tuning-panel">
-          <div className="panel-title">
-            <div>
-              <span className="eyebrow">VISUAL INPUT SETUP</span>
-              <h2>Response tuning</h2>
-            </div>
-            <strong>{sourceLabel(tuningSource)}</strong>
-          </div>
-          <p>{tuningDetail}</p>
-          <div className="tuning-grid">
-            <article className="tuning-card">
-              <div className="tuning-heading">
-                <div>
-                  <span>Device check</span>
-                  <strong>{visionTuning.inferenceFps} FPS in use</strong>
-                </div>
-                <button
-                  data-calibration-control
-                  disabled={activeTest !== null || visionStatus !== 'READY'}
-                  onClick={() => void runFrameRateCheck()}
-                >
-                  {tuningMode === 'FRAME_RATE' ? 'Checking...' : 'Check camera speed'}
-                </button>
-              </div>
-              <p>Tests 10, 12 and 15 FPS, then keeps the fastest rate this device can sustain.</p>
-              <div className="probe-results">
-                {VISION_INFERENCE_FPS_OPTIONS.map((fps) => {
-                  const result = frameProbeResults.find((candidate) => candidate.requestedFps === fps);
-                  return (
-                    <span key={fps} className={result ? 'measured' : ''}>
-                      <strong>{fps} FPS</strong>
-                      {result
-                        ? `${result.effectiveFps.toFixed(1)} actual · ${result.medianInferenceDurationMs.toFixed(1)} ms work`
-                        : 'Not checked'}
-                    </span>
-                  );
-                })}
-              </div>
-            </article>
-
-            <article className="tuning-card">
-              <div className="tuning-heading">
-                <div>
-                  <span>Gesture response</span>
-                  <strong>{holdSliderMs} ms hold</strong>
-                </div>
-                <button
-                  data-calibration-control
-                  disabled={activeTest !== null || visionStatus !== 'READY'}
-                  onClick={() => void runRapidGestureCheck()}
-                >
-                  {tuningMode === 'GESTURE_HOLD' ? 'Testing...' : 'Find response time'}
-                </button>
-              </div>
-              <p>
-                Starts and ends slowly. Between them, follow each gesture and RELAX cue immediately;
-                there is no random WAIT.
-              </p>
-              <div className="rapid-results" aria-label="Rapid gesture results">
-                {RAPID_GESTURE_STABILITY_STEPS_MS.map((stabilityMs) => {
-                  const result = rapidResults.find((candidate) => candidate.stabilityMs === stabilityMs);
-                  const state = !result
-                    ? 'pending'
-                    : result.cueDetected && result.neutralRecovered
-                      ? 'passed'
-                      : 'failed';
-                  return <span className={state} key={stabilityMs}>{stabilityMs} ms</span>;
-                })}
-              </div>
-              <label className="hold-slider">
-                <span>Manual adjustment</span>
-                <input
-                  data-calibration-control
-                  type="range"
-                  min="120"
-                  max="320"
-                  step="40"
-                  value={holdSliderMs}
-                  disabled={activeTest !== null}
-                  onChange={(event) => setHoldSliderMs(Number(event.currentTarget.value))}
-                />
-                <small>Stable</small>
-                <small>Fast</small>
-              </label>
-              <button data-calibration-control disabled={activeTest !== null} onClick={saveHoldSlider}>
-                Save {holdSliderMs} ms
-              </button>
-            </article>
-          </div>
-        </section>
-      )}
 
       {selection.task === 'DIRECTION' && (
         <section className="direction-result-grid">
@@ -1012,6 +1130,25 @@ function median(values: readonly number[]): number | null {
     : sorted[middle] ?? null;
 }
 
+/** Times raw pointing dropouts so a stability value can be recommended from them. */
+function collectPointGap(
+  collector: PointGapCollector | null,
+  shapeObserved: boolean,
+  capturedAt: number,
+): void {
+  if (!collector) return;
+  collector.sampleCount += 1;
+  if (!shapeObserved) {
+    if (collector.lastObservedAt !== null) collector.missing = true;
+    return;
+  }
+  if (collector.missing && collector.lastObservedAt !== null) {
+    collector.gapsMs.push(capturedAt - collector.lastObservedAt);
+  }
+  collector.lastObservedAt = capturedAt;
+  collector.missing = false;
+}
+
 function pause(durationMs: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, durationMs));
 }
@@ -1100,12 +1237,14 @@ function SourceCard({
   source,
   score,
   active,
+  busy,
   onTest,
 }: {
   role: string;
   source: InputSourceId;
   score?: ChannelScore;
   active: boolean;
+  busy: boolean;
   onTest: () => void;
 }) {
   return (
@@ -1113,7 +1252,7 @@ function SourceCard({
       <span>{role}</span>
       <strong>{sourceLabel(source)}</strong>
       <small>{score ? `${evidenceLabel(score)} saved on this device` : 'Calibration required'}</small>
-      <button data-calibration-control disabled={active} onClick={onTest}>
+      <button data-calibration-control disabled={busy} onClick={onTest}>
         {score ? `Retest ${sourceLabel(source)}` : `Test ${sourceLabel(source)}`}
       </button>
     </article>

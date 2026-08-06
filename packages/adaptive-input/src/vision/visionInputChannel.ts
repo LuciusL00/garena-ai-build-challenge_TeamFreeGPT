@@ -13,7 +13,12 @@ import {
   type GestureCommandGateConfig,
   type GestureCommandGateState,
 } from './gestureCommandGate.ts';
-import { PointDirectionTracker, type DirectionVector } from './pointDirection.ts';
+import {
+  DEFAULT_POINT_STABILITY_MS,
+  PointDirectionTracker,
+  pointStabilityConfig,
+  type DirectionVector,
+} from './pointDirection.ts';
 
 export const MEDIAPIPE_TASKS_VISION_VERSION = '0.10.35';
 export const MEDIAPIPE_WASM_URL = '/mediapipe/wasm';
@@ -43,10 +48,14 @@ export interface VisionDiagnostic {
   readonly commandConfidence: number;
   /** Raw confidence for focusTriggerSource(), before stability/cooldown gating. */
   readonly focusedCommandConfidence: number;
+  /** Raw pointing shape recognition for this frame, before any grace period. */
+  readonly pointShapeObserved: boolean;
   readonly timing: VisionTimingDiagnostic;
 }
 export interface VisionInputChannelOptions {
   readonly inferenceFps?: VisionInferenceFps;
+  /** How long pointing survives a recognition gap. Defaults to 180 ms. */
+  readonly pointStabilityMs?: number;
   /** Bounded, explicit A/B settings. Defaults remain 200/450/150 ms. */
   readonly gestureTiming?: {
     readonly stabilityMs?: number;
@@ -116,7 +125,7 @@ export class VisionInputChannel implements InputChannel {
   private previousInferenceStartedAt: number | null = null;
   private triggerFocus: InputSourceId | null = null;
   private inferenceFps: VisionInferenceFps;
-  private readonly point = new PointDirectionTracker();
+  private readonly point: PointDirectionTracker;
   /** One gate for the currently processed hand; future hands can own separate gates. */
   private readonly commandGate: GestureCommandGate;
 
@@ -125,6 +134,11 @@ export class VisionInputChannel implements InputChannel {
     private readonly options: VisionInputChannelOptions = {},
   ) {
     this.inferenceFps = readInferenceFps(options.inferenceFps ?? DEFAULT_INFERENCE_FPS);
+    this.point = new PointDirectionTracker(
+      pointStabilityConfig(
+        boundedTiming('pointStabilityMs', options.pointStabilityMs, DEFAULT_POINT_STABILITY_MS),
+      ),
+    );
     this.commandGate = new GestureCommandGate((candidate, timestamp) => {
       this.context?.emit({
         kind: 'trigger',
@@ -153,6 +167,16 @@ export class VisionInputChannel implements InputChannel {
     if (this.timer === null) return;
     window.clearInterval(this.timer);
     this.scheduleInference();
+  }
+
+  get pointStabilityMs(): number {
+    return this.point.stabilityMs;
+  }
+
+  setPointStabilityMs(stabilityMs: number): void {
+    this.point.setStabilityMs(
+      boundedTiming('pointStabilityMs', stabilityMs, DEFAULT_POINT_STABILITY_MS),
+    );
   }
 
   setGestureStabilityMs(source: VisionTriggerSource, stabilityMs: number): void {
@@ -305,27 +329,24 @@ export class VisionInputChannel implements InputChannel {
       const gestures = result.gestures[0] ?? [];
       const candidates = triggerCandidates(gestures);
       const detectedCommand = highestConfidenceGestureCommand(candidates);
-      const directionBlockingCommand = detectedCommand !== null &&
-        detectedCommand.confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence
-        ? detectedCommand
-        : null;
+      /** One confused frame must not release pointing; the tracker requires a held pose. */
+      const competingCommand = detectedCommand !== null &&
+        detectedCommand.confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence;
       const gatedCommand = this.triggerFocus === null
         ? detectedCommand
         : candidates.find((candidate) => candidate.source === this.triggerFocus) ?? null;
       this.commandGate.update(timestamp, gatedCommand);
 
-      let direction: DirectionVector | null = null;
-      if (directionBlockingCommand !== null) {
-        if (this.pointing) this.emitPointingEnd(timestamp);
-        else this.point.reset();
-      } else {
-        direction = this.point.update(result.landmarks[0] ?? [], timestamp);
-        if (direction) {
-          this.pointing = true;
-          this.context?.emit({ kind: 'direction', source: InputSourceId.HAND_POINT_DIRECTION, timestamp, direction });
-        } else if (this.pointing) {
-          this.emitPointingEnd(timestamp);
-        }
+      const direction: DirectionVector | null = this.point.update(
+        result.landmarks[0] ?? [],
+        timestamp,
+        competingCommand,
+      );
+      if (direction) {
+        this.pointing = true;
+        this.context?.emit({ kind: 'direction', source: InputSourceId.HAND_POINT_DIRECTION, timestamp, direction });
+      } else if (this.pointing) {
+        this.emitPointingEnd(timestamp);
       }
       const fistConfidence = confidenceFor(candidates, InputSourceId.HAND_CLOSED_FIST);
       const focusedCommandConfidence = this.triggerFocus === null
@@ -345,6 +366,7 @@ export class VisionInputChannel implements InputChannel {
         confirmedCommand: commandState === 'LOCKED' ? this.commandGate.activeSource : null,
         commandConfidence: detectedCommand?.confidence ?? 0,
         focusedCommandConfidence,
+        pointShapeObserved: this.point.isShapeObserved,
         timing: {
           ...startupTiming,
           inferenceDurationMs,
