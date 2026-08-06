@@ -14,7 +14,12 @@ import { InputSourceId } from '../../../packages/adaptive-input/src/index.ts';
 import { GameActionBus, type Squad } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import { wireCanvasInput, wireUiInput } from './input.ts';
-import { getArenaLayout, getInitialSquadCenter, type Point } from './ui/layout.ts';
+import {
+  GESTURE_MIRROR_LAYOUT,
+  getArenaLayout,
+  getInitialSquadCenter,
+  type Point,
+} from './ui/layout.ts';
 import {
   getStrategy,
   STRATEGIES,
@@ -131,6 +136,10 @@ interface UiRefs {
   visionStatus: HTMLElement;
   visionDetail: HTMLElement;
   cameraVideo: HTMLVideoElement;
+  gestureMirror: HTMLElement;
+  gestureMirrorVideo: HTMLVideoElement;
+  gestureMirrorCanvas: HTMLCanvasElement;
+  gestureMirrorLabel: HTMLElement;
   trainingPanel: HTMLElement;
   trainingCanvas: HTMLCanvasElement;
   trainingGesture: HTMLElement;
@@ -392,6 +401,7 @@ class SwarmfallGame {
   private activeStrategy: StrategyId | null = null;
   private movementDirection: Point | null = null;
   private lastFrame = 0;
+  private simulationAccumulator = 0;
   private lastUiUpdate = 0;
   private toastUntil = 0;
 
@@ -514,9 +524,15 @@ class SwarmfallGame {
   }
 
   private frame(timestamp: number): void {
-    const delta = this.lastFrame === 0 ? 0 : Math.min(0.04, (timestamp - this.lastFrame) / 1000);
+    const elapsed = this.lastFrame === 0
+      ? 0
+      : Math.min(BALANCE.maxSimulationCatchUpSeconds, (timestamp - this.lastFrame) / 1000);
     this.lastFrame = timestamp;
-    this.update(delta);
+    this.simulationAccumulator += elapsed;
+    while (this.simulationAccumulator >= BALANCE.simulationStepSeconds) {
+      this.update(BALANCE.simulationStepSeconds);
+      this.simulationAccumulator -= BALANCE.simulationStepSeconds;
+    }
     this.draw();
     if (timestamp - this.lastUiUpdate > 80) this.updateUi(false);
     requestAnimationFrame((nextTimestamp) => this.frame(nextTimestamp));
@@ -1165,6 +1181,22 @@ function createUi(root: HTMLElement): UiRefs {
       <main class="game-area">
         <div class="arena-frame">
           <canvas id="arena" aria-label="Swarmfall tactical arena. Use commands to gather, spread and direct the selected units."></canvas>
+          <aside
+            class="gesture-mirror"
+            id="gesture-mirror"
+            style="--gesture-mirror-top: ${GESTURE_MIRROR_LAYOUT.top}px; --gesture-mirror-right: ${GESTURE_MIRROR_LAYOUT.right}px; --gesture-mirror-width: ${GESTURE_MIRROR_LAYOUT.width}px; --gesture-mirror-mobile-width: ${GESTURE_MIRROR_LAYOUT.mobileWidth}px"
+            aria-label="Live mirrored hand gesture preview"
+            hidden
+          >
+            <video id="gesture-mirror-video" muted playsinline aria-hidden="true"></video>
+            <canvas
+              id="gesture-mirror-wire"
+              width="${GESTURE_MIRROR_LAYOUT.canvasWidth}"
+              height="${GESTURE_MIRROR_LAYOUT.canvasHeight}"
+              aria-hidden="true"
+            ></canvas>
+            <div class="gesture-mirror-reading"><span>Hand input</span><strong id="gesture-mirror-label">Neutral</strong></div>
+          </aside>
           <div class="toast" id="toast" role="status" aria-live="polite"></div>
           <div class="overlay" id="round-overlay">
             <section class="overlay-card" id="intro-panel">
@@ -1303,6 +1335,10 @@ function createUi(root: HTMLElement): UiRefs {
     visionStatus: query('#vision-status'),
     visionDetail: query('#vision-detail'),
     cameraVideo: query<HTMLVideoElement>('#adaptive-camera'),
+    gestureMirror: query('#gesture-mirror'),
+    gestureMirrorVideo: query<HTMLVideoElement>('#gesture-mirror-video'),
+    gestureMirrorCanvas: query<HTMLCanvasElement>('#gesture-mirror-wire'),
+    gestureMirrorLabel: query('#gesture-mirror-label'),
     trainingPanel: query('#gesture-training'),
     trainingCanvas: query<HTMLCanvasElement>('#training-canvas'),
     trainingGesture: query('#training-gesture'),
@@ -1658,6 +1694,44 @@ function createTrainingPreview(canvas: HTMLCanvasElement) {
   };
 }
 
+function createGestureMirror(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Gesture mirror canvas context is unavailable.');
+
+  return {
+    clear(): void {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    },
+    accept(diagnostic: VisionDiagnostic): void {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      if (diagnostic.handLandmarks.length === 0) return;
+
+      context.save();
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.lineWidth = 3;
+      context.strokeStyle = 'rgba(184, 241, 93, .9)';
+      for (const connection of diagnostic.handConnections) {
+        const start = diagnostic.handLandmarks[connection.start];
+        const end = diagnostic.handLandmarks[connection.end];
+        if (!start || !end) continue;
+        context.beginPath();
+        context.moveTo(start.x * canvas.width, start.y * canvas.height);
+        context.lineTo(end.x * canvas.width, end.y * canvas.height);
+        context.stroke();
+      }
+
+      context.fillStyle = '#61d7d7';
+      for (const landmark of diagnostic.handLandmarks) {
+        context.beginPath();
+        context.arc(landmark.x * canvas.width, landmark.y * canvas.height, 4, 0, TAU);
+        context.fill();
+      }
+      context.restore();
+    },
+  };
+}
+
 function trainingCommandLabel(source: InputSourceId): string {
   if (source === InputSourceId.HAND_CLOSED_FIST) return 'Closed fist · Gather';
   if (source === InputSourceId.HAND_OPEN_PALM) return 'Open palm · Spread';
@@ -1686,6 +1760,8 @@ const root = document.querySelector<HTMLDivElement>('#app');
 if (!root) throw new Error('App root is missing.');
 const ui = createUi(root);
 const trainingPreview = createTrainingPreview(ui.trainingCanvas);
+const gestureMirror = createGestureMirror(ui.gestureMirrorCanvas);
+let trainingActive = false;
 const canvas = root.querySelector<HTMLCanvasElement>('#arena');
 if (!canvas) throw new Error('Arena canvas is missing.');
 const arenaFrame = root.querySelector<HTMLElement>('.arena-frame');
@@ -1699,7 +1775,7 @@ const showAttempt = (feedback: AdaptiveAttemptFeedback): void => {
     ? `${feedback.sourceLabel}${confidence} used for ${feedback.actionLabel}`
     : `${feedback.sourceLabel} did not run ${feedback.actionLabel}; it currently uses ${feedback.bindingLabel}`;
 };
-const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
+const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, ui.gestureMirrorVideo, {
   onAttempt: showAttempt,
   onNotice: (message, isError) => {
     ui.inputActivity.textContent = message;
@@ -1739,19 +1815,31 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
     ui.visionStatus.textContent = labels[status];
     ui.visionDetail.textContent = detail ?? '';
     ui.inputIndicator.classList.toggle('active', status === 'READY');
+    const previewVisible = status === 'LOADING' || status === 'READY';
+    ui.gestureMirror.toggleAttribute('hidden', !previewVisible);
+    if (status === 'LOADING') ui.gestureMirrorLabel.textContent = 'Loading hand model';
+    if (!previewVisible) {
+      gestureMirror.clear();
+      ui.gestureMirrorLabel.textContent = 'Neutral';
+    }
   },
   onTrainingChanged: (active) => {
+    trainingActive = active;
     ui.trainingStart.hidden = active;
     ui.trainingStop.hidden = !active;
     ui.trainingGesture.textContent = active ? 'Show a gesture' : 'Camera off';
     if (active) trainingPreview.start(); else trainingPreview.stop();
   },
-  onTrainingDiagnostic: (diagnostic) => {
-    trainingPreview.accept(diagnostic);
-    ui.trainingGesture.textContent = trainingDiagnosticLabel(diagnostic);
-    ui.trainingConfidence.textContent = diagnostic.direction
-      ? `Direction ${diagnostic.direction.x.toFixed(2)}, ${diagnostic.direction.y.toFixed(2)}`
-      : `${Math.round(diagnostic.commandConfidence * 100)}% confidence · ${diagnostic.commandState.toLowerCase()}`;
+  onVisionDiagnostic: (diagnostic) => {
+    gestureMirror.accept(diagnostic);
+    ui.gestureMirrorLabel.textContent = trainingDiagnosticLabel(diagnostic);
+    if (trainingActive) {
+      trainingPreview.accept(diagnostic);
+      ui.trainingGesture.textContent = trainingDiagnosticLabel(diagnostic);
+      ui.trainingConfidence.textContent = diagnostic.direction
+        ? `Direction ${diagnostic.direction.x.toFixed(2)}, ${diagnostic.direction.y.toFixed(2)}`
+        : `${Math.round(diagnostic.commandConfidence * 100)}% confidence · ${diagnostic.commandState.toLowerCase()}`;
+    }
   },
 });
 const pendingSettings = new URLSearchParams(window.location.search);

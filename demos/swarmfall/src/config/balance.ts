@@ -1,5 +1,7 @@
 export const BALANCE = {
   roundSeconds: 60,
+  simulationStepSeconds: 1 / 60,
+  maxSimulationCatchUpSeconds: 0.25,
   guardCount: 5,
   harvesterCount: 5,
   coreRadius: 34,

@@ -11,6 +11,15 @@ export interface ArenaLayout {
 
 export type SquadLayoutId = 'GUARDS' | 'HARVESTERS';
 
+export const GESTURE_MIRROR_LAYOUT = {
+  top: 12,
+  right: 12,
+  width: 184,
+  mobileWidth: 128,
+  canvasWidth: 320,
+  canvasHeight: 240,
+} as const;
+
 export function getArenaLayout(width: number, height: number): ArenaLayout {
   return {
     width,

@@ -39,6 +39,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .game-area { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 10px; margin-top: 10px; }
 .arena-frame { position: relative; min-height: 530px; border: 1px solid var(--line); background: #081512; overflow: hidden; }
 #arena { display: block; width: 100%; height: 100%; min-height: 530px; touch-action: none; cursor: crosshair; }
+.gesture-mirror { position: absolute; top: var(--gesture-mirror-top); right: var(--gesture-mirror-right); z-index: 6; overflow: hidden; width: var(--gesture-mirror-width); aspect-ratio: 4 / 3; border: 1px solid var(--lime); background: #020706; box-shadow: 0 8px 28px rgba(0, 0, 0, .38); pointer-events: none; }
+.gesture-mirror[hidden] { display: none; }
+.gesture-mirror video, .gesture-mirror canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+.gesture-mirror video { object-fit: cover; }
+.gesture-mirror canvas { z-index: 1; }
+.gesture-mirror-reading { position: absolute; right: 5px; bottom: 5px; left: 5px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 4px 6px; color: var(--muted); background: rgba(2, 8, 7, .78); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.gesture-mirror-reading strong { overflow: hidden; color: var(--lime); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .side-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); background: var(--panel); }
 .panel-title { margin: 0; color: var(--text); font-size: 15px; }
 .panel-copy { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -135,6 +142,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .mission { text-align: left; }
   .game-area { grid-template-columns: 1fr; }
   .arena-frame, #arena { min-height: 58svh; }
+  .gesture-mirror { width: var(--gesture-mirror-mobile-width); }
   .side-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .side-panel > .panel-title, .side-panel > .panel-copy, .side-panel > .active-strategy, .side-panel > .squad-readout { grid-column: 1 / -1; }
   .settings-layer { align-items: end; padding: 0; }

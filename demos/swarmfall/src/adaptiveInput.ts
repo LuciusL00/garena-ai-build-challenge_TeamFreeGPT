@@ -82,7 +82,7 @@ export interface SwarmfallAdaptiveCallbacks {
   onVisionStatus(status: VisionStatus, detail?: string): void;
   onDeviceSettingsChanged(view: VisionDeviceSettingsView): void;
   onTrainingChanged(active: boolean): void;
-  onTrainingDiagnostic(diagnostic: VisionDiagnostic): void;
+  onVisionDiagnostic(diagnostic: VisionDiagnostic): void;
 }
 
 function sourceLabel(source: InputSourceId): string {
@@ -103,7 +103,12 @@ export class SwarmfallAdaptiveInput {
   private training = false;
   private activeDirectionSource: InputSourceId | null = null;
 
-  constructor(gameBus: GameActionBus, video: HTMLVideoElement, private readonly callbacks: SwarmfallAdaptiveCallbacks) {
+  constructor(
+    gameBus: GameActionBus,
+    video: HTMLVideoElement,
+    previewVideo: HTMLVideoElement,
+    private readonly callbacks: SwarmfallAdaptiveCallbacks,
+  ) {
     this.adaptive.registerActions(SWARMFALL_ACTION_CATALOG);
     this.settings = new BindingSettingsController(this.adaptive, SWARMFALL_ACTION_CATALOG, AVAILABLE_INPUTS);
     this.adaptive.on('GATHER_UNITS', (payload) => gameBus.emit('GATHER_UNITS', payload));
@@ -120,6 +125,7 @@ export class SwarmfallAdaptiveInput {
       inferenceFps: visionTuning.inferenceFps,
       pointStabilityMs: visionTuning.pointStabilityMs,
       gestureTiming: { stabilityMsBySource: visionTuning.gestureStabilityMs },
+      previewVideo,
       onStatus: (status, detail) => {
         this.visionStatus = status;
         this.callbacks.onVisionStatus(status, detail);
@@ -133,7 +139,7 @@ export class SwarmfallAdaptiveInput {
         }
       },
       onDiagnostic: (diagnostic) => {
-        if (this.training) this.callbacks.onTrainingDiagnostic(diagnostic);
+        this.callbacks.onVisionDiagnostic(diagnostic);
       },
     });
     this.visionDevice = new VisionDeviceSettings(this.vision, visionTuningStore);

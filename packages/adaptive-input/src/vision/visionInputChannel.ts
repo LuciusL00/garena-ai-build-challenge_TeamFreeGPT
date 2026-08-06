@@ -18,6 +18,7 @@ import {
   PointDirectionTracker,
   pointStabilityConfig,
   type DirectionVector,
+  type HandLandmark,
 } from './pointDirection.ts';
 
 export const MEDIAPIPE_TASKS_VISION_VERSION = '0.10.35';
@@ -50,6 +51,13 @@ export interface VisionDiagnostic {
   readonly focusedCommandConfidence: number;
   /** Raw pointing shape recognition for this frame, before any grace period. */
   readonly pointShapeObserved: boolean;
+  /** Normalized, game-independent hand points for an optional local preview. */
+  readonly handLandmarks: readonly HandLandmark[];
+  /** MediaPipe's hand topology, expressed only as landmark index pairs. */
+  readonly handConnections: readonly {
+    readonly start: number;
+    readonly end: number;
+  }[];
   readonly timing: VisionTimingDiagnostic;
 }
 export interface VisionInputChannelOptions {
@@ -63,6 +71,8 @@ export interface VisionInputChannelOptions {
     readonly cooldownMs?: number;
     readonly neutralMs?: number;
   };
+  /** Optional second local preview. It shares the processing stream and never opens another camera. */
+  readonly previewVideo?: HTMLVideoElement;
   readonly onStatus?: (status: VisionStatus, detail: string) => void;
   readonly onDiagnostic?: (diagnostic: VisionDiagnostic) => void;
 }
@@ -312,6 +322,13 @@ export class VisionInputChannel implements InputChannel {
         return;
       }
       const cameraReadyAt = performance.now();
+      const previewVideo = this.options.previewVideo;
+      if (previewVideo && previewVideo !== this.video) {
+        previewVideo.srcObject = stream;
+        void previewVideo.play().catch(() => {
+          // A decorative preview must never disable the underlying input channel.
+        });
+      }
       this.report('LOADING', 'Loading the on-device hand model…');
       const modelStartedAt = performance.now();
       const fileset = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
@@ -374,6 +391,7 @@ export class VisionInputChannel implements InputChannel {
       const gestures = result.gestures[0] ?? [];
       const candidates = triggerCandidates(gestures);
       const detectedCommand = highestConfidenceGestureCommand(candidates);
+      const handLandmarks = result.landmarks[0] ?? [];
       /** One confused frame must not release pointing; the tracker requires a held pose. */
       const competingCommand = detectedCommand !== null &&
         detectedCommand.confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence;
@@ -383,7 +401,7 @@ export class VisionInputChannel implements InputChannel {
       this.commandGate.update(timestamp, gatedCommand);
 
       const direction: DirectionVector | null = this.point.update(
-        result.landmarks[0] ?? [],
+        handLandmarks,
         timestamp,
         competingCommand,
       );
@@ -422,6 +440,8 @@ export class VisionInputChannel implements InputChannel {
         commandConfidence: detectedCommand?.confidence ?? 0,
         focusedCommandConfidence,
         pointShapeObserved: this.point.isShapeObserved,
+        handLandmarks,
+        handConnections: GestureRecognizer.HAND_CONNECTIONS,
         timing,
       });
     } catch (error: unknown) {
@@ -475,6 +495,11 @@ export class VisionInputChannel implements InputChannel {
     this.stream = null;
     stream?.getTracks().forEach((track) => track.stop());
     this.video.srcObject = null;
+    const previewVideo = this.options.previewVideo;
+    if (previewVideo && previewVideo !== this.video) {
+      previewVideo.pause();
+      previewVideo.srcObject = null;
+    }
     const recognizer = this.recognizer;
     this.recognizer = null;
     this.context = null;
