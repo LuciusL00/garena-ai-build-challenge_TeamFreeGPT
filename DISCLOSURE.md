@@ -45,8 +45,9 @@ inside the browser and are not uploaded to Google, a CDN or the deployment host.
 No LLM API or other inference API is used by the current build. Natural-language mapping and
 strategy generation are deferred.
 
-The public demonstration is hosted through OpenAI Sites. Hosting serves the web application; it
-does not receive raw camera frames from MediaPipe processing.
+The public demonstration is hosted through GitHub Pages, with an earlier OpenAI Sites deployment
+retained as a historical mirror. Hosting serves the web application; neither host receives raw
+camera frames from MediaPipe processing.
 
 ## Datasets and player data
 
