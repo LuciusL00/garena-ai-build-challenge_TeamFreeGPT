@@ -1,5 +1,10 @@
 import { FilesetResolver, GestureRecognizer } from '@mediapipe/tasks-vision';
 import { ChannelUnavailableError, type ChannelContext, type InputChannel } from '../channel.ts';
+import {
+  VISION_INFERENCE_FPS_OPTIONS,
+  type VisionInferenceFps,
+  type VisionTriggerSource,
+} from '../profile.ts';
 import { InputChannelId, InputSourceId } from '../sources.ts';
 import {
   DEFAULT_GESTURE_COMMAND_CONFIG,
@@ -15,7 +20,7 @@ export const MEDIAPIPE_WASM_URL = '/mediapipe/wasm';
 export const GESTURE_RECOGNIZER_MODEL_URL =
   '/mediapipe/models/gesture_recognizer.task';
 
-const DEFAULT_INFERENCE_FPS = 15;
+const DEFAULT_INFERENCE_FPS: VisionInferenceFps = 15;
 
 export type VisionStatus = 'IDLE' | 'REQUESTING' | 'LOADING' | 'READY' | 'ERROR';
 export interface VisionTimingDiagnostic {
@@ -25,6 +30,7 @@ export interface VisionTimingDiagnostic {
   readonly inferenceDurationMs: number;
   readonly sampleIntervalMs: number | null;
   readonly effectiveFps: number | null;
+  readonly requestedFps: VisionInferenceFps;
 }
 export interface VisionDiagnostic {
   readonly fistState: GestureCommandGateState;
@@ -35,18 +41,43 @@ export interface VisionDiagnostic {
   /** Trigger command that passed confidence, stability and neutral re-arm gating. */
   readonly confirmedCommand: InputSourceId | null;
   readonly commandConfidence: number;
+  /** Raw confidence for focusTriggerSource(), before stability/cooldown gating. */
+  readonly focusedCommandConfidence: number;
   readonly timing: VisionTimingDiagnostic;
 }
 export interface VisionInputChannelOptions {
-  readonly inferenceFps?: number;
+  readonly inferenceFps?: VisionInferenceFps;
   /** Bounded, explicit A/B settings. Defaults remain 200/450/150 ms. */
   readonly gestureTiming?: {
     readonly stabilityMs?: number;
+    readonly stabilityMsBySource?: Readonly<Partial<Record<VisionTriggerSource, number>>>;
     readonly cooldownMs?: number;
     readonly neutralMs?: number;
   };
   readonly onStatus?: (status: VisionStatus, detail: string) => void;
   readonly onDiagnostic?: (diagnostic: VisionDiagnostic) => void;
+}
+
+export interface VisionFrameRateProbeResult {
+  readonly requestedFps: VisionInferenceFps;
+  readonly effectiveFps: number;
+  readonly medianInferenceDurationMs: number;
+  readonly sampleCount: number;
+}
+
+/** Chooses the highest rate that kept up with its target and frame-time budget. */
+export function recommendVisionInferenceFps(
+  results: readonly VisionFrameRateProbeResult[],
+): VisionInferenceFps | null {
+  const sustainable = results
+    .filter((result) => {
+      const frameBudgetMs = 1_000 / result.requestedFps;
+      return result.sampleCount >= 5 &&
+        result.effectiveFps >= result.requestedFps * 0.85 &&
+        result.medianInferenceDurationMs <= frameBudgetMs * 0.8;
+    })
+    .sort((left, right) => right.requestedFps - left.requestedFps);
+  return sustainable[0]?.requestedFps ?? null;
 }
 
 const GESTURE_TIMING_MIN_MS = 0;
@@ -80,10 +111,11 @@ export class VisionInputChannel implements InputChannel {
   private trackEndCleanup: (() => void) | null = null;
   private startupTiming: Omit<
     VisionTimingDiagnostic,
-    'inferenceDurationMs' | 'sampleIntervalMs' | 'effectiveFps'
+    'inferenceDurationMs' | 'sampleIntervalMs' | 'effectiveFps' | 'requestedFps'
   > | null = null;
   private previousInferenceStartedAt: number | null = null;
   private triggerFocus: InputSourceId | null = null;
+  private inferenceFps: VisionInferenceFps;
   private readonly point = new PointDirectionTracker();
   /** One gate for the currently processed hand; future hands can own separate gates. */
   private readonly commandGate: GestureCommandGate;
@@ -92,6 +124,7 @@ export class VisionInputChannel implements InputChannel {
     private readonly video: HTMLVideoElement,
     private readonly options: VisionInputChannelOptions = {},
   ) {
+    this.inferenceFps = readInferenceFps(options.inferenceFps ?? DEFAULT_INFERENCE_FPS);
     this.commandGate = new GestureCommandGate((candidate, timestamp) => {
       this.context?.emit({
         kind: 'trigger',
@@ -108,6 +141,23 @@ export class VisionInputChannel implements InputChannel {
 
   get focusedTriggerSource(): InputSourceId | null {
     return this.triggerFocus;
+  }
+
+  get requestedInferenceFps(): VisionInferenceFps {
+    return this.inferenceFps;
+  }
+
+  setInferenceFps(fps: VisionInferenceFps): void {
+    this.inferenceFps = readInferenceFps(fps);
+    this.previousInferenceStartedAt = null;
+    if (this.timer === null) return;
+    window.clearInterval(this.timer);
+    this.scheduleInference();
+  }
+
+  setGestureStabilityMs(source: VisionTriggerSource, stabilityMs: number): void {
+    const bounded = boundedTiming('stabilityMs', stabilityMs, DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs);
+    this.commandGate.setStabilityMs(source, bounded);
   }
 
   /**
@@ -219,8 +269,7 @@ export class VisionInputChannel implements InputChannel {
         modelStartupDurationMs: modelReadyAt - modelStartedAt,
         totalStartupDurationMs: modelReadyAt - startupStartedAt,
       };
-      const fps = Math.max(10, Math.min(15, this.options.inferenceFps ?? DEFAULT_INFERENCE_FPS));
-      this.timer = window.setInterval(() => this.infer(), 1000 / fps);
+      this.scheduleInference();
       this.report('READY', 'Camera ready. Processing stays on this device.');
     } catch (error: unknown) {
       if (!this.isCurrentStart(generation)) return;
@@ -279,6 +328,9 @@ export class VisionInputChannel implements InputChannel {
         }
       }
       const fistConfidence = confidenceFor(candidates, InputSourceId.HAND_CLOSED_FIST);
+      const focusedCommandConfidence = this.triggerFocus === null
+        ? detectedCommand?.confidence ?? 0
+        : confidenceFor(candidates, this.triggerFocus);
       const commandState = this.commandGate.state;
       const startupTiming = this.startupTiming;
       if (!startupTiming) throw new Error('Vision startup timing is unavailable.');
@@ -292,6 +344,7 @@ export class VisionInputChannel implements InputChannel {
         detectedCommand: detectedCommand?.source ?? null,
         confirmedCommand: commandState === 'LOCKED' ? this.commandGate.activeSource : null,
         commandConfidence: detectedCommand?.confidence ?? 0,
+        focusedCommandConfidence,
         timing: {
           ...startupTiming,
           inferenceDurationMs,
@@ -299,6 +352,7 @@ export class VisionInputChannel implements InputChannel {
           effectiveFps: sampleIntervalMs === null || sampleIntervalMs <= 0
             ? null
             : 1_000 / sampleIntervalMs,
+          requestedFps: this.inferenceFps,
         },
       });
     } catch (error: unknown) {
@@ -313,6 +367,10 @@ export class VisionInputChannel implements InputChannel {
     this.pointing = false;
     this.point.reset();
     this.context?.emit({ kind: 'direction-end', source: InputSourceId.HAND_POINT_DIRECTION, timestamp });
+  }
+
+  private scheduleInference(): void {
+    this.timer = window.setInterval(() => this.infer(), 1_000 / this.inferenceFps);
   }
 
   private isCurrentStart(generation: number): boolean {
@@ -400,6 +458,7 @@ function gestureCommandConfig(
       timing?.stabilityMs,
       DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs,
     ),
+    stabilityMsBySource: readStabilityBySource(timing?.stabilityMsBySource),
     cooldownMs: boundedTiming(
       'cooldownMs',
       timing?.cooldownMs,
@@ -411,6 +470,32 @@ function gestureCommandConfig(
       DEFAULT_GESTURE_COMMAND_CONFIG.neutralMs,
     ),
   };
+}
+
+function readStabilityBySource(
+  values: Readonly<Partial<Record<VisionTriggerSource, number>>> | undefined,
+): Readonly<Partial<Record<VisionTriggerSource, number>>> {
+  if (!values) return {};
+  const result: Partial<Record<VisionTriggerSource, number>> = {};
+  TRIGGER_DEFINITIONS.forEach(({ source }) => {
+    const value = values[source];
+    if (value !== undefined) {
+      result[source] = boundedTiming(
+        `stabilityMsBySource.${source}`,
+        value,
+        DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs,
+      );
+    }
+  });
+  return result;
+}
+
+function readInferenceFps(value: number): VisionInferenceFps {
+  const match = VISION_INFERENCE_FPS_OPTIONS.find((fps) => fps === value);
+  if (match === undefined) {
+    throw new RangeError(`inferenceFps must be one of ${VISION_INFERENCE_FPS_OPTIONS.join(', ')}.`);
+  }
+  return match;
 }
 
 function boundedTiming(name: string, value: number | undefined, fallback: number): number {

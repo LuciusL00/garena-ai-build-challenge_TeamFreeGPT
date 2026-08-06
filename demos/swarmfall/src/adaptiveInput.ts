@@ -4,6 +4,7 @@ import {
   CalibrationProfileStore,
   InputSourceId,
   VisionInputChannel,
+  VisionTuningStore,
   channelOf,
   InputChannelId,
   type BindingActionView,
@@ -99,7 +100,10 @@ export class SwarmfallAdaptiveInput {
     this.adaptive.on('DIRECT_UNITS', (payload) => gameBus.emit('DIRECT_UNITS', payload));
     this.adaptive.bindings.onChange(() => this.refreshSettings());
 
+    const visionTuning = new VisionTuningStore(window.localStorage).load();
     this.vision = new VisionInputChannel(video, {
+      inferenceFps: visionTuning.inferenceFps,
+      gestureTiming: { stabilityMsBySource: visionTuning.gestureStabilityMs },
       onStatus: (status, detail) => {
         this.visionStatus = status;
         this.callbacks.onVisionStatus(status, detail);

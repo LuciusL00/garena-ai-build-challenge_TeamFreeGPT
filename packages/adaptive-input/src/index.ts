@@ -32,10 +32,15 @@ export {
   ChannelUnavailableError,
 } from './channel.ts';
 
-export { VisionInputChannel } from './vision/visionInputChannel.ts';
+export {
+  VisionInputChannel,
+  recommendVisionInferenceFps,
+} from './vision/visionInputChannel.ts';
 export type {
   VisionDiagnostic,
+  VisionFrameRateProbeResult,
   VisionInputChannelOptions,
+  VisionTimingDiagnostic,
   VisionStatus,
 } from './vision/visionInputChannel.ts';
 export * from './vision/closedFistGate.ts';

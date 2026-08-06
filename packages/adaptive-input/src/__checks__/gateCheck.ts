@@ -14,7 +14,10 @@ import {
   PointDirectionTracker,
   VisionInputChannel,
   compareChannelScores,
+  VisionTuningStore,
   highestConfidenceGestureCommand,
+  recommendRapidGestureStabilityMs,
+  recommendVisionInferenceFps,
   scoreCalibration,
 } from '../index.ts';
 import type {
@@ -316,6 +319,22 @@ async function main(): Promise<void> {
   check(
     'profile scores survive save and load',
     restoredProfile.get('TRIGGER', InputSourceId.HAND_CLOSED_FIST)?.successRate === 1,
+  );
+  const tuningStorage = new VisionTuningStore(new MemoryProfileStorage());
+  tuningStorage.save({
+    inferenceFps: 12,
+    gestureStabilityMs: {
+      [InputSourceId.HAND_CLOSED_FIST]: 160,
+      [InputSourceId.HAND_OPEN_PALM]: 240,
+    },
+  });
+  const restoredTuning = tuningStorage.load();
+  check('device frame-rate choice survives save and load', restoredTuning.inferenceFps === 12);
+  check(
+    'gesture hold time is remembered separately for each pose',
+    restoredTuning.gestureStabilityMs[InputSourceId.HAND_CLOSED_FIST] === 160 &&
+      restoredTuning.gestureStabilityMs[InputSourceId.HAND_OPEN_PALM] === 240 &&
+      restoredTuning.gestureStabilityMs[InputSourceId.HAND_THUMB_UP] === undefined,
   );
   console.log('\nRule-based recommendation');
   const recommender = new ControlRecommender();
@@ -659,6 +678,60 @@ async function main(): Promise<void> {
   check('55% confidence still requires the full hold time', confidenceActivations.length === 0);
   confidenceGate.update(500, { source: InputSourceId.HAND_THUMB_UP, confidence: 0.55 });
   check('55% confidence activates after the configured hold', confidenceActivations[0] === 500);
+
+  const perPoseActivations: InputSourceId[] = [];
+  const perPoseGate = new GestureCommandGate(
+    (candidate) => perPoseActivations.push(candidate.source),
+    {
+      ...DEFAULT_GESTURE_COMMAND_CONFIG,
+      stabilityMsBySource: { [InputSourceId.HAND_CLOSED_FIST]: 120 },
+    },
+  );
+  perPoseGate.update(0, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  perPoseGate.update(120, { source: InputSourceId.HAND_CLOSED_FIST, confidence: 0.9 });
+  check('a saved pose-specific hold time overrides the default', perPoseActivations.length === 1);
+  perPoseGate.reset();
+  perPoseGate.update(1_000, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  perPoseGate.update(1_120, { source: InputSourceId.HAND_OPEN_PALM, confidence: 0.9 });
+  check('another pose keeps the default hold time', perPoseActivations.length === 1);
+
+  const completeRapidRun = [320, 280, 240, 200, 160, 120].map((stabilityMs) => ({
+    stabilityMs,
+    cueDetected: true,
+    neutralRecovered: true,
+  }));
+  check(
+    'rapid tuner recommends the shortest setting only when every cue passes',
+    recommendRapidGestureStabilityMs(completeRapidRun, { startPassed: true, endPassed: true }) === 120,
+  );
+  check(
+    'rapid tuner stops at the first failed cue even if a later cue passes',
+    recommendRapidGestureStabilityMs(
+      completeRapidRun.map((result) => result.stabilityMs === 200
+        ? { ...result, cueDetected: false }
+        : result),
+      { startPassed: true, endPassed: true },
+    ) === 240,
+  );
+  check(
+    'rapid tuner rejects a run when either slow bookend fails',
+    recommendRapidGestureStabilityMs(completeRapidRun, { startPassed: true, endPassed: false }) === null,
+  );
+
+  check(
+    'frame-rate probe chooses the highest sustainable measured rate',
+    recommendVisionInferenceFps([
+      { requestedFps: 10, effectiveFps: 9.8, medianInferenceDurationMs: 20, sampleCount: 10 },
+      { requestedFps: 12, effectiveFps: 11.7, medianInferenceDurationMs: 24, sampleCount: 12 },
+      { requestedFps: 15, effectiveFps: 11.5, medianInferenceDurationMs: 25, sampleCount: 15 },
+    ]) === 12,
+  );
+  check(
+    'frame-rate probe refuses to decide from too few samples',
+    recommendVisionInferenceFps([
+      { requestedFps: 15, effectiveFps: 15, medianInferenceDurationMs: 10, sampleCount: 4 },
+    ]) === null,
+  );
 
   checkThrows('vision timing options reject values above their bound', () => {
     new VisionInputChannel({} as HTMLVideoElement, { gestureTiming: { stabilityMs: 2_001 } });

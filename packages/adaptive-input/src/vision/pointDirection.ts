@@ -72,7 +72,6 @@ export class PointDirectionTracker {
     const tip = landmarks[8];
     const raw = normalize({ x: -(tip.x - base.x), y: tip.y - base.y });
     if (!raw) return this.holdOrEnd(timestamp);
-
     const next = this.filtered
       ? normalize({
           x: this.filtered.x * (1 - this.config.smoothingAlpha) + raw.x * this.config.smoothingAlpha,
@@ -80,7 +79,6 @@ export class PointDirectionTracker {
         })
       : raw;
     if (!next) return this.holdOrEnd(timestamp);
-
     this.filtered = next;
     this.lastObservedAt = timestamp;
     if (
