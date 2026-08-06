@@ -15,14 +15,14 @@ export const STRATEGIES: readonly StrategyDefinition[] = [
   {
     id: 'MINER_PROTECT',
     label: 'Miner Protect',
-    description: 'Empty miners escort a loaded miner home while the rest keep extracting.',
+    description: 'Empty miners escort loaded miners home.',
     guardPolicy: 'INTERCEPT_THREATS',
     harvesterPolicy: 'PROTECT_LOADED_MINER',
   },
   {
     id: 'ESCORT',
     label: 'Guard Escort',
-    description: 'A guard follows each loaded miner inside the guard territory.',
+    description: 'A guard escorts each loaded miner.',
     guardPolicy: 'ESCORT_LOADED_MINER',
     harvesterPolicy: 'MINE_AND_BANK',
   },

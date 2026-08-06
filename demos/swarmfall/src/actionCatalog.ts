@@ -9,7 +9,7 @@ export const SWARMFALL_ACTION_CATALOG = [
   {
     id: 'GATHER_UNITS',
     label: 'Gather units',
-    description: 'Pulls the selected unit type into a compact formation.',
+    description: 'Pull selected units together.',
     context: 'GAMEPLAY',
     requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
@@ -18,7 +18,7 @@ export const SWARMFALL_ACTION_CATALOG = [
   {
     id: 'SPREAD_UNITS',
     label: 'Spread units',
-    description: 'Sends the selected unit type into a wide formation.',
+    description: 'Spread selected units out.',
     context: 'GAMEPLAY',
     requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
@@ -27,7 +27,7 @@ export const SWARMFALL_ACTION_CATALOG = [
   {
     id: 'TOGGLE_SQUAD',
     label: 'Switch squad',
-    description: 'Changes control between guards and harvesters.',
+    description: 'Switch guards and harvesters.',
     context: 'GAMEPLAY',
     requirements: { task: 'TRIGGER', spatial: false, latencyCritical: false },
     defaultSource: InputSourceId.TOUCH_BUTTON,
@@ -36,7 +36,7 @@ export const SWARMFALL_ACTION_CATALOG = [
   {
     id: 'DIRECT_UNITS',
     label: 'Direct units',
-    description: 'Steers the selected unit type while a direction is held.',
+    description: 'Steer selected units.',
     context: 'GAMEPLAY',
     requirements: { task: 'DIRECTION', spatial: false, latencyCritical: true },
     defaultSource: InputSourceId.TOUCH_DIRECTION,

@@ -1167,8 +1167,8 @@ function createUi(root: HTMLElement): UiRefs {
             <section class="overlay-card" id="intro-panel">
               <div class="eyebrow">One minute // One core</div>
               <h1>Command the swarm.</h1>
-              <p>Choose a unit type, gather or spread its formation, then drag or point in the direction it should move.</p>
-              <p class="tip">Five guards repel asteroids. Five harvesters mine and bank ore.</p>
+              <p>Choose guards or harvesters. Gather, spread, then drag or point to move.</p>
+              <p class="tip">Guards repel asteroids. Harvesters bank ore.</p>
               <button type="button" data-action="begin-round">Begin extraction</button>
             </section>
             <section class="overlay-card" id="result-panel" hidden>
@@ -1183,20 +1183,19 @@ function createUi(root: HTMLElement): UiRefs {
         </div>
         <aside class="side-panel" aria-label="Swarm commands">
           <h2 class="panel-title">Swarm commands</h2>
-          <p class="panel-copy">Closed fist gathers. Open palm spreads. Point directs. Thumbs up switches unit type.</p>
+          <p class="panel-copy">Fist: gather · Palm: spread · Point: move · Thumb: switch.</p>
           <div class="squad-readout"><span class="label">Selected squad</span><strong id="selected-squad">Guards</strong></div>
           <div class="touch-commands">
             <button type="button" data-action="gather-units">Gather</button>
             <button type="button" data-action="spread-units">Spread</button>
             <button type="button" data-action="switch-squad">Switch unit type</button>
           </div>
-          <p class="panel-copy">Touch fallback: drag anywhere in the arena to direct the selected units.</p>
+          <p class="panel-copy">Drag the arena to direct units.</p>
           <h2 class="panel-title">Optional tactics</h2>
-          <p class="panel-copy">Squads already mine and defend. These built-in tactics only adjust how they support loaded miners.</p>
           <div class="strategy-list">
             ${STRATEGIES.map((strategy) => `<button class="strategy" type="button" data-strategy="${strategy.id}"><strong>${strategy.label}</strong><small>${strategy.description}</small></button>`).join('')}
           </div>
-          <div class="active-strategy"><span class="label">Active tactic</span><strong id="active-strategy">Normal jobs</strong><span class="microcopy" id="strategy-hint">Tactics are optional</span></div>
+          <div class="active-strategy"><span class="label">Active tactic</span><strong id="active-strategy">Normal jobs</strong><span class="microcopy" id="strategy-hint">Optional</span></div>
         </aside>
       </main>
       <footer class="bottom-bar">
@@ -1223,7 +1222,7 @@ function createUi(root: HTMLElement): UiRefs {
               </div>
               <div class="current-binding"><span class="label">Current input</span><strong id="settings-current-binding">Touch button</strong></div>
               <div class="settings-source-list" id="settings-source-list" aria-label="Compatible inputs"></div>
-              <div class="settings-recommendation" id="settings-recommendation">Choose an alternative input to compare it with the current control.</div>
+              <div class="settings-recommendation" id="settings-recommendation">Choose another input to compare.</div>
               <div class="settings-comparison" id="settings-comparison" hidden></div>
               <div class="settings-buttons">
                 <button class="secondary" id="settings-test" type="button" data-action="start-adaptive-calibration" hidden>Test inputs</button>
@@ -1232,7 +1231,7 @@ function createUi(root: HTMLElement): UiRefs {
                 <button class="primary" id="settings-confirm" type="button" data-action="confirm-adaptive-binding" hidden>Use alternative input</button>
               </div>
               <section class="training-panel" id="gesture-training">
-                <div><h3>Gesture training</h3><p>Try gestures without changing the live game.</p></div>
+                <div><h3>Gesture training</h3><p>Practice without changing controls.</p></div>
                 <div class="training-stage">
                   <video id="adaptive-camera" muted playsinline aria-label="Mirrored camera preview"></video>
                   <canvas id="training-canvas" width="640" height="360" aria-label="Training swarm overlay"></canvas>
@@ -1244,14 +1243,14 @@ function createUi(root: HTMLElement): UiRefs {
                 </div>
               </section>
               <section class="camera-speed" id="camera-speed">
-                <div><h3>Camera speed</h3><p id="camera-speed-detail">One rate is used by every camera input on this device.</p></div>
+                <div><h3>Camera speed</h3><p id="camera-speed-detail">Applies to every camera input.</p></div>
                 <div class="camera-speed-options" id="camera-speed-options" role="group" aria-label="Camera processing rate"></div>
                 <button class="secondary" id="camera-speed-measure" type="button" data-action="measure-camera-speed">Measure this device</button>
               </section>
               <button class="restore-default" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore game default</button>
               <div class="vision-readout">
                 <span><span class="label">Visual input</span> <strong id="vision-status">Off</strong></span>
-                <span id="vision-detail">Camera starts only after you approve a camera-based input.</span>
+                <span id="vision-detail">Camera starts only for camera controls.</span>
               </div>
             </section>
           </div>

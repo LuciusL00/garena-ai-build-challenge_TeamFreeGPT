@@ -26,9 +26,9 @@
 .source-card > small { grid-row: 3; color: var(--muted); }
 .source-card > button { grid-column: 2; grid-row: 1 / span 3; }
 .source-card.active { border-color: var(--cyan); box-shadow: inset 0 0 35px rgba(110,231,255,.08); }
-/* Panels keep their own height: the camera panel is short and should stay short. */
 .lab-grid { --camera-bar: 0px; display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 18px; }
 .lab-grid.single-column { grid-template-columns: 1fr; }
+.lab-column { display: grid; min-width: 0; align-content: start; gap: 18px; }
 .lab-panel { padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
 .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .panel-title h2 { margin: 0; font-size: 20px; }
@@ -59,6 +59,7 @@
 .calibration-lab .touch-action { color: #061016; border-color: var(--green); background: var(--green); }
 .test-cue { display: grid; place-items: center; min-height: 180px; border: 1px solid #1e3b4d; border-radius: 14px; color: var(--text); background: #091620; font-size: clamp(28px, 5vw, 50px); font-weight: 900; text-align: center; }
 .test-cue.active { box-shadow: inset 0 0 55px rgba(110,231,255,.08); }
+.prompt-detail { margin-bottom: 0; }
 .direction-pad { display: grid; place-items: center; min-height: 180px; margin-bottom: 12px; overflow: hidden; border: 1px solid #315064; border-radius: 50%; color: var(--muted); background: radial-gradient(circle, #162d3b 0 8%, #091620 9% 46%, #122431 47% 49%, #091620 50%); text-align: center; touch-action: none; user-select: none; }
 .direction-pad span { max-width: 150px; pointer-events: none; }
 .direction-pad i { position: absolute; width: 1px; height: 1px; }
@@ -122,8 +123,10 @@
 .review-binding { display: inline-flex; align-items: center; min-height: 46px; margin-top: 14px; padding: 10px 16px; border-radius: 10px; color: #061016; background: var(--green); font-weight: 800; text-decoration: none; }
 @media (max-width: 760px) {
   .calibration-lab { padding-top: 16px; }
-  /* Block layout, not a one-column grid: a sticky grid item cannot leave its row. */
-  .lab-grid { display: block; }
+  /* Flatten both desktop columns so the camera and cue can remain sticky across
+     the complete phone workflow. */
+  .lab-grid { display: flex; flex-direction: column; }
+  .lab-column, .prompt-panel { display: contents; }
   .direction-result-grid, .tuning-grid { grid-template-columns: 1fr; }
   .lab-panel { padding: 14px; }
   /* The intro is reference text, not the task: it keeps its words but not the screen. */
@@ -165,14 +168,16 @@
   .camera-panel .button-row { flex-wrap: nowrap; margin-top: 6px; gap: 6px; }
   .camera-panel .button-row button { flex: 1; min-width: 0; min-height: 36px; padding: 6px 4px; font-size: 12px; white-space: nowrap; }
   .camera-panel > p { margin: 10px 0 0; font-size: 13px; }
-  .camera-note { display: none; }
 
   /* Pinned flush under the camera bar, so nothing scrolls through the seam. */
   .test-cue {
     position: sticky; top: var(--camera-bar); z-index: 15;
     min-height: 96px; font-size: clamp(26px, 8vw, 36px);
   }
-  .camera-panel.live + .test-panel { padding-top: 12px; }
+  .prompt-detail { margin: 10px 14px 12px; }
+  .prompt-panel .touch-action { margin: 0 14px 12px; }
+  .prompt-panel .direction-pad { width: calc(100% - 28px); margin: 0 14px 12px; }
+  .test-panel { margin-top: 12px; }
   .panel-title { align-items: flex-start; }
   .direction-metrics { grid-template-columns: 1fr 1fr; }
   .probe-results { grid-template-columns: 1fr; }

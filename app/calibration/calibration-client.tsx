@@ -139,7 +139,7 @@ export default function CalibrationClient() {
   const [selection, setSelection] = useState<CalibrationSelection>(DEFAULT_SELECTION);
   const [visionStatus, setVisionStatus] = useState<VisionStatus>('IDLE');
   const [visionDetail, setVisionDetail] = useState(
-    'Camera access is required to test camera-based controls. Video processing stays on this device.',
+    'Camera required for visual inputs. Processing stays on this device.',
   );
   const [detectedSource, setDetectedSource] = useState<InputSourceId | null>(null);
   const [detectorState, setDetectorState] = useState('READY');
@@ -150,16 +150,16 @@ export default function CalibrationClient() {
   const [cue, setCue] = useState('Choose an input to test');
   const [progress, setProgress] = useState('0 / 6');
   const [testDetail, setTestDetail] = useState(
-    'Saved results are reused. Run only the input whose result is missing or needs retesting.',
+    'Saved results are reused; retest only when needed.',
   );
   const [scores, setScores] = useState<readonly ChannelScore[]>([]);
   const [tuningMode, setTuningMode] = useState<TuningMode>(null);
   const [rapidResults, setRapidResults] = useState<readonly RapidGestureStepResult[]>([]);
   const [tuningDetail, setTuningDetail] = useState(
-    'Follow the cue, then relax. The test lowers the hold time step by step and keeps the fastest one that stayed reliable.',
+    'Follow each cue, then relax. The fastest reliable hold is saved.',
   );
   const [pointDetail, setPointDetail] = useState(
-    'Run the direction test to measure how often recognition drops, then this recommends the shortest stability that survives it.',
+    'Run Direction Test to find the shortest stable release delay.',
   );
   const [visionTuning, setVisionTuning] = useState(DEFAULT_VISION_TUNING_PREFERENCES);
   const [holdSliderMs, setHoldSliderMs] = useState(DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs);
@@ -451,9 +451,9 @@ export default function CalibrationClient() {
     setRapidResults([]);
     setProgress('Step 1');
     setTuningDetail(
-      `Follow ${triggerCue(source)}, then RELAX, without pausing. The hold time drops step by step, then repeats the one it reaches ${tuner.confirmationsRequired} times.`,
+      `Follow ${triggerCue(source)}, then RELAX. The reached hold repeats ${tuner.confirmationsRequired} times.`,
     );
-    setTestDetail('Response tuning is running. Follow the cue above; no score is recorded here.');
+    setTestDetail('Tuning only — no score is recorded.');
     vision.focusTriggerSource(source);
 
     const results: RapidGestureStepResult[] = [];
@@ -507,7 +507,7 @@ export default function CalibrationClient() {
       );
     }
     vision.focusTriggerSource(null);
-    setTestDetail('Response tuning finished. Run the activation test to compare this input with touch.');
+    setTestDetail('Tuning complete. Run Activation Test to compare with touch.');
     changeTuningMode(null);
   };
 
@@ -737,10 +737,7 @@ export default function CalibrationClient() {
         <a href={returnHref} data-calibration-control>← Back to controls</a>
         <span>CONTROL SETUP</span>
         <h1>Input Performance Test</h1>
-        <p>
-          The active input and proposed alternative are measured independently. Existing results
-          are reused; choosing an alternative here does not activate or bind it.
-        </p>
+        <p>Test each input separately. Results do not change your controls.</p>
       </header>
 
       <section className="source-cards" aria-label="Inputs being compared">
@@ -763,7 +760,8 @@ export default function CalibrationClient() {
       </section>
 
       <section className={`lab-grid ${cameraNeeded ? '' : 'single-column'}`} ref={labGridRef}>
-        {cameraNeeded && (
+        <div className="lab-column camera-column">
+          {cameraNeeded && (
           <article
             className={`lab-panel camera-panel ${visionStatus === 'READY' ? 'live' : ''}`}
             ref={cameraPanelRef}
@@ -795,17 +793,36 @@ export default function CalibrationClient() {
                 </div>
               </div>
             </div>
-            {/* Once the camera is ready the status chip says so; the copy only repeats it. */}
             {visionStatus !== 'READY' && <p>{visionDetail}</p>}
             {selection.task === 'DIRECTION' && <DirectionDiagnostic direction={direction} />}
-            <small className="skip-note camera-note">
-              Camera speed is one setting for every visual input, so it lives in the game&apos;s
-              Controls panel rather than in any single input&apos;s test.
-            </small>
           </article>
-        )}
+          )}
 
-        <article className="lab-panel test-panel">
+          <article className="lab-panel prompt-panel">
+            <div className={`test-cue ${busy ? 'active' : ''}`}>{cue}</div>
+            <p className="prompt-detail">{testDetail}</p>
+            {selection.task === 'TRIGGER' && activeTest === InputSourceId.TOUCH_BUTTON && (
+              <button className="touch-action">Touch action</button>
+            )}
+            {selection.task === 'DIRECTION' && activeTest === InputSourceId.TOUCH_DIRECTION && (
+              <div
+                className="direction-pad"
+                onPointerDown={emitTouchDirection}
+                onPointerMove={emitTouchDirection}
+                onPointerUp={endTouchDirection}
+                onPointerCancel={endTouchDirection}
+                role="application"
+                aria-label="Touch direction calibration pad"
+              >
+                <span>Drag toward the cue and hold</span>
+                <i />
+              </div>
+            )}
+          </article>
+        </div>
+
+        <div className="lab-column test-column">
+          <article className="lab-panel test-panel">
           <div className="panel-title">
             <h2>{selection.task === 'TRIGGER' ? 'Activation test' : 'Direction test'}</h2>
             <span>{progress}</span>
@@ -825,32 +842,8 @@ export default function CalibrationClient() {
                   </button>
                 ))}
               </div>
-              {testMode === 'quick' && (
-                <p>
-                  Quick Test is a preview only. Saving it replaces the previous result, including
-                  a Full Test.
-                </p>
-              )}
+              {testMode === 'quick' && <p>Quick overwrites the saved result, including Full.</p>}
             </>
-          )}
-          <div className={`test-cue ${busy ? 'active' : ''}`}>{cue}</div>
-          <p>{testDetail}</p>
-          {selection.task === 'TRIGGER' && activeTest === InputSourceId.TOUCH_BUTTON && (
-            <button className="touch-action">Touch action</button>
-          )}
-          {selection.task === 'DIRECTION' && activeTest === InputSourceId.TOUCH_DIRECTION && (
-            <div
-              className="direction-pad"
-              onPointerDown={emitTouchDirection}
-              onPointerMove={emitTouchDirection}
-              onPointerUp={endTouchDirection}
-              onPointerCancel={endTouchDirection}
-              role="application"
-              aria-label="Touch direction calibration pad"
-            >
-              <span>Touch, drag and hold toward the cue</span>
-              <i />
-            </div>
           )}
           {tuningSource && (
             <article className="tuning-card response-tuning">
@@ -869,7 +862,7 @@ export default function CalibrationClient() {
               </div>
               <p>{tuningDetail}</p>
               <label className="hold-slider">
-                <span>Hold time before the gesture counts</span>
+                <span>Gesture hold time</span>
                 <input
                   data-calibration-control
                   type="range"
@@ -912,7 +905,7 @@ export default function CalibrationClient() {
               </div>
               <p>{pointDetail}</p>
               <label className="hold-slider">
-                <span>How long pointing survives a recognition gap</span>
+                <span>Release delay after recognition drops</span>
                 <input
                   data-calibration-control
                   type="range"
@@ -931,23 +924,19 @@ export default function CalibrationClient() {
                   Save {pointSliderMs} ms
                 </button>
               </div>
-              <small className="skip-note">
-                Pointing is continuous, so it has no hold time before it starts — this only
-                changes how long it waits before letting go.
-              </small>
+              <small className="skip-note">Changes release delay, not start delay.</small>
             </article>
           )}
 
           <div className="button-row test-actions">
             <button data-calibration-control onClick={stopTest}>Stop test</button>
             <a className="skip-calibration" href={skipHref} data-calibration-control>
-              Skip calibration for testing
+              Skip for testing
             </a>
           </div>
-          <small className="skip-note">
-            Skipping saves no score and never marks either input as calibrated.
-          </small>
-        </article>
+          <small className="skip-note">Skipping saves no result.</small>
+          </article>
+        </div>
       </section>
 
       {selection.task === 'DIRECTION' && (
@@ -972,7 +961,7 @@ export default function CalibrationClient() {
         <div className={`recommendation ${recommendation.verdict}`}>
           <span>{verdictLabel(recommendation.verdict)}</span>
           <strong>{recommendation.explanation}</strong>
-          <small>Your controls have not been changed. You keep the final choice.</small>
+          <small>No controls changed.</small>
         </div>
         {currentScore && alternativeScore && (
           <a className="review-binding" href={returnHref} data-calibration-control>
