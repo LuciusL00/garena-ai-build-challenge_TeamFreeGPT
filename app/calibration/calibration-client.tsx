@@ -738,6 +738,25 @@ export default function CalibrationClient() {
         <span>CONTROL SETUP</span>
         <h1>Input Performance Test</h1>
         <p>Test each input separately. Results do not change your controls.</p>
+        {selection.task === 'TRIGGER' && (
+          <div aria-label="Calibration length">
+            <p>Choose the length of the normal activation test.</p>
+            <div className="mode-row">
+              {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
+                <button
+                  data-calibration-control
+                  className={testMode === mode ? 'selected' : ''}
+                  disabled={busy}
+                  key={mode}
+                  onClick={() => chooseMode(mode)}
+                >
+                  {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
+                </button>
+              ))}
+            </div>
+            {testMode === 'quick' && <p>Quick overwrites the saved result, including Full.</p>}
+          </div>
+        )}
       </header>
 
       <section className="source-cards" aria-label="Inputs being compared">
@@ -827,24 +846,6 @@ export default function CalibrationClient() {
             <h2>{selection.task === 'TRIGGER' ? 'Activation test' : 'Direction test'}</h2>
             <span>{progress}</span>
           </div>
-          {selection.task === 'TRIGGER' && (
-            <>
-              <div className="mode-row" aria-label="Calibration length">
-                {(Object.keys(TEST_CONFIGS) as TestMode[]).map((mode) => (
-                  <button
-                    data-calibration-control
-                    className={testMode === mode ? 'selected' : ''}
-                    disabled={busy}
-                    key={mode}
-                    onClick={() => chooseMode(mode)}
-                  >
-                    {TEST_CONFIGS[mode].label} ({TEST_CONFIGS[mode].trialCount})
-                  </button>
-                ))}
-              </div>
-              {testMode === 'quick' && <p>Quick overwrites the saved result, including Full.</p>}
-            </>
-          )}
           {tuningSource && (
             <article className="tuning-card response-tuning">
               <div className="tuning-heading">

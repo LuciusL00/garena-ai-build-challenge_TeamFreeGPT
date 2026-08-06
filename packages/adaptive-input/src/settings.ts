@@ -179,7 +179,16 @@ export class VisionDeviceSettings {
       this.results = await this.target.measureInferenceFps();
       const recommended = recommend(this.results);
       if (recommended === null) {
-        this.detail = 'No rate produced enough steady samples. Your current choice was kept.';
+        if (this.results.length === 0) {
+          this.detail = 'The camera test ended before any rate produced a result. Your current choice was kept.';
+        } else {
+          const fallback = VISION_INFERENCE_FPS_OPTIONS[0];
+          this.apply(
+            fallback,
+            'MEASURED',
+            `No rate was stable, so ${fallback} FPS was selected as the safest fallback.`,
+          );
+        }
       } else {
         this.apply(
           recommended,
