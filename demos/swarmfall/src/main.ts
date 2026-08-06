@@ -7,6 +7,7 @@ import {
 import type {
   ChannelScore,
   MetricComparison,
+  VisionDeviceSettingsView,
   VisionDiagnostic,
 } from '../../../packages/adaptive-input/src/index.ts';
 import { InputSourceId } from '../../../packages/adaptive-input/src/index.ts';
@@ -123,6 +124,9 @@ interface UiRefs {
   settingsKeep: HTMLButtonElement;
   settingsConfirm: HTMLButtonElement;
   settingsReset: HTMLButtonElement;
+  cameraSpeedOptions: HTMLElement;
+  cameraSpeedDetail: HTMLElement;
+  cameraSpeedMeasure: HTMLButtonElement;
   schemeToggle: HTMLButtonElement;
   visionStatus: HTMLElement;
   visionDetail: HTMLElement;
@@ -1239,6 +1243,11 @@ function createUi(root: HTMLElement): UiRefs {
                   <button class="secondary" id="training-stop" type="button" data-action="stop-gesture-training" hidden>Stop training</button>
                 </div>
               </section>
+              <section class="camera-speed" id="camera-speed">
+                <div><h3>Camera speed</h3><p id="camera-speed-detail">One rate is used by every camera input on this device.</p></div>
+                <div class="camera-speed-options" id="camera-speed-options" role="group" aria-label="Camera processing rate"></div>
+                <button class="secondary" id="camera-speed-measure" type="button" data-action="measure-camera-speed">Measure this device</button>
+              </section>
               <button class="restore-default" id="settings-reset" type="button" data-action="reset-adaptive-binding">Restore game default</button>
               <div class="vision-readout">
                 <span><span class="label">Visual input</span> <strong id="vision-status">Off</strong></span>
@@ -1285,6 +1294,9 @@ function createUi(root: HTMLElement): UiRefs {
     settingsKeep: query<HTMLButtonElement>('#settings-keep'),
     settingsConfirm: query<HTMLButtonElement>('#settings-confirm'),
     settingsReset: query<HTMLButtonElement>('#settings-reset'),
+    cameraSpeedOptions: query('#camera-speed-options'),
+    cameraSpeedDetail: query('#camera-speed-detail'),
+    cameraSpeedMeasure: query<HTMLButtonElement>('#camera-speed-measure'),
     schemeToggle: query<HTMLButtonElement>('#control-scheme-toggle'),
     visionStatus: query('#vision-status'),
     visionDetail: query('#vision-detail'),
@@ -1297,6 +1309,20 @@ function createUi(root: HTMLElement): UiRefs {
     trainingStop: query<HTMLButtonElement>('#training-stop'),
     strategyButtons: root.querySelectorAll<HTMLButtonElement>('[data-strategy]'),
   };
+}
+
+function renderCameraSpeed(view: VisionDeviceSettingsView, ui: UiRefs): void {
+  ui.cameraSpeedOptions.innerHTML = view.options
+    .map((option) => {
+      const measured = option.measured
+        ? `${option.measured.effectiveFps.toFixed(1)} actual · ${option.measured.inferenceDurationMs.toFixed(0)} ms`
+        : 'Not measured';
+      return `<button class="camera-speed-option${option.selected ? ' selected' : ''}" type="button" data-camera-fps="${option.fps}"${view.measuring ? ' disabled' : ''}><strong>${option.fps} FPS</strong><small>${measured}</small></button>`;
+    })
+    .join('');
+  ui.cameraSpeedDetail.textContent = view.detail;
+  ui.cameraSpeedMeasure.disabled = !view.measurable;
+  ui.cameraSpeedMeasure.textContent = view.measuring ? 'Measuring…' : 'Measure this device';
 }
 
 function renderBindingSettings(view: SwarmfallBindingSettingsView, ui: UiRefs): void {
@@ -1672,6 +1698,7 @@ const adaptive = new SwarmfallAdaptiveInput(bus, ui.cameraVideo, {
     }
   },
   onSettingsChanged: (view) => renderBindingSettings(view, ui),
+  onDeviceSettingsChanged: (view) => renderCameraSpeed(view, ui),
   onSettingsVisibilityChanged: (open) => {
     ui.settingsLayer.toggleAttribute('hidden', !open);
   },

@@ -87,6 +87,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .restore-default { justify-self: start; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; text-decoration: underline; cursor: pointer; }
 .vision-readout { display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
 .vision-readout strong { color: var(--text); }
+.camera-speed { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.camera-speed h3 { margin: 0 0 4px; }
+.camera-speed p { margin: 0; color: var(--muted); font-size: 11px; }
+.camera-speed-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.camera-speed-option { display: grid; gap: 3px; min-height: 52px; padding: 7px; border: 1px solid var(--line); color: var(--text); background: var(--panel-2); cursor: pointer; }
+.camera-speed-option small { color: var(--muted); font-size: 10px; }
+.camera-speed-option.selected { border-color: var(--lime); color: var(--lime); }
+.camera-speed-option.selected small { color: var(--lime); }
+.camera-speed-option:disabled { opacity: .55; cursor: not-allowed; }
+.camera-speed button.secondary { min-height: 44px; border: 1px solid var(--line); color: var(--text); background: var(--panel-2); font-weight: 700; cursor: pointer; }
+.camera-speed button.secondary:disabled { opacity: .5; cursor: not-allowed; }
 .training-panel { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
 .training-stage { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--line); background: #020706; }
 .training-stage video, .training-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }

@@ -74,6 +74,9 @@ export interface VisionFrameRateProbeResult {
   readonly sampleCount: number;
 }
 
+const FRAME_PROBE_WARMUP_MS = 300;
+const FRAME_PROBE_SAMPLE_MS = 1_200;
+
 /** Chooses the highest rate that kept up with its target and frame-time budget. */
 export function recommendVisionInferenceFps(
   results: readonly VisionFrameRateProbeResult[],
@@ -123,6 +126,8 @@ export class VisionInputChannel implements InputChannel {
     'inferenceDurationMs' | 'sampleIntervalMs' | 'effectiveFps' | 'requestedFps'
   > | null = null;
   private previousInferenceStartedAt: number | null = null;
+  private probeSamples: VisionTimingDiagnostic[] | null = null;
+  private probing = false;
   private triggerFocus: InputSourceId | null = null;
   private inferenceFps: VisionInferenceFps;
   private readonly point: PointDirectionTracker;
@@ -167,6 +172,46 @@ export class VisionInputChannel implements InputChannel {
     if (this.timer === null) return;
     window.clearInterval(this.timer);
     this.scheduleInference();
+  }
+
+  /**
+   * Measures what this device actually sustains at each supported rate. The
+   * channel owns its own frame timing, so hosts never assemble this themselves.
+   * The requested rate is restored afterwards; applying a result is the caller's
+   * decision.
+   */
+  async measureInferenceFps(
+    options: readonly VisionInferenceFps[] = VISION_INFERENCE_FPS_OPTIONS,
+  ): Promise<readonly VisionFrameRateProbeResult[]> {
+    if (!this.isActive) {
+      throw new ChannelUnavailableError(
+        this.id,
+        'not-supported',
+        'The camera must be running before its speed can be measured.',
+      );
+    }
+    if (this.probing) throw new Error('A camera speed measurement is already running.');
+    this.probing = true;
+    const originalFps = this.inferenceFps;
+    const results: VisionFrameRateProbeResult[] = [];
+    try {
+      for (const fps of options) {
+        this.setInferenceFps(fps);
+        await delay(FRAME_PROBE_WARMUP_MS);
+        if (!this.isActive || !this.probing) break;
+        this.probeSamples = [];
+        await delay(FRAME_PROBE_SAMPLE_MS);
+        const samples = this.probeSamples ?? [];
+        this.probeSamples = null;
+        if (!this.isActive || !this.probing) break;
+        results.push(summarizeFrameProbe(fps, samples));
+      }
+    } finally {
+      this.probeSamples = null;
+      this.probing = false;
+      if (this.isActive) this.setInferenceFps(originalFps);
+    }
+    return results;
   }
 
   get pointStabilityMs(): number {
@@ -355,6 +400,16 @@ export class VisionInputChannel implements InputChannel {
       const commandState = this.commandGate.state;
       const startupTiming = this.startupTiming;
       if (!startupTiming) throw new Error('Vision startup timing is unavailable.');
+      const timing: VisionTimingDiagnostic = {
+        ...startupTiming,
+        inferenceDurationMs,
+        sampleIntervalMs,
+        effectiveFps: sampleIntervalMs === null || sampleIntervalMs <= 0
+          ? null
+          : 1_000 / sampleIntervalMs,
+        requestedFps: this.inferenceFps,
+      };
+      this.probeSamples?.push(timing);
       this.options.onDiagnostic?.({
         fistState: this.commandGate.activeSource === InputSourceId.HAND_CLOSED_FIST
           ? commandState
@@ -367,15 +422,7 @@ export class VisionInputChannel implements InputChannel {
         commandConfidence: detectedCommand?.confidence ?? 0,
         focusedCommandConfidence,
         pointShapeObserved: this.point.isShapeObserved,
-        timing: {
-          ...startupTiming,
-          inferenceDurationMs,
-          sampleIntervalMs,
-          effectiveFps: sampleIntervalMs === null || sampleIntervalMs <= 0
-            ? null
-            : 1_000 / sampleIntervalMs,
-          requestedFps: this.inferenceFps,
-        },
+        timing,
       });
     } catch (error: unknown) {
       this.failActive(errorMessage(error));
@@ -418,6 +465,8 @@ export class VisionInputChannel implements InputChannel {
   }
 
   private releaseResources(): void {
+    this.probing = false;
+    this.probeSamples = null;
     this.trackEndCleanup?.();
     this.trackEndCleanup = null;
     if (this.timer !== null) window.clearInterval(this.timer);
@@ -448,6 +497,35 @@ export class VisionInputChannel implements InputChannel {
   private report(status: VisionStatus, detail: string): void {
     this.options.onStatus?.(status, detail);
   }
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, durationMs));
+}
+
+function summarizeFrameProbe(
+  requestedFps: VisionInferenceFps,
+  samples: readonly VisionTimingDiagnostic[],
+): VisionFrameRateProbeResult {
+  const matching = samples.filter((sample) => sample.requestedFps === requestedFps);
+  const effective = matching.flatMap((sample) =>
+    sample.effectiveFps === null ? [] : [sample.effectiveFps],
+  );
+  return {
+    requestedFps,
+    effectiveFps: median(effective) ?? 0,
+    medianInferenceDurationMs: median(matching.map((sample) => sample.inferenceDurationMs)) ?? 0,
+    sampleCount: matching.length,
+  };
+}
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : sorted[middle] ?? null;
 }
 
 function triggerCandidates(

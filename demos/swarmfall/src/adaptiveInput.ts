@@ -3,11 +3,15 @@ import {
   BindingSettingsController,
   CalibrationProfileStore,
   InputSourceId,
+  VisionDeviceSettings,
   VisionInputChannel,
   VisionTuningStore,
   channelOf,
   InputChannelId,
+  recommendVisionInferenceFps,
   type BindingActionView,
+  type VisionDeviceSettingsView,
+  type VisionInferenceFps,
   type BindingChangePreview,
   type BindingSourceView,
   type CalibrationTask,
@@ -71,6 +75,7 @@ export interface SwarmfallAdaptiveCallbacks {
   onSettingsVisibilityChanged(open: boolean): void;
   onCalibrationRequested(request: CalibrationRequest): void;
   onVisionStatus(status: VisionStatus, detail?: string): void;
+  onDeviceSettingsChanged(view: VisionDeviceSettingsView): void;
   onTrainingChanged(active: boolean): void;
   onTrainingDiagnostic(diagnostic: VisionDiagnostic): void;
 }
@@ -84,6 +89,8 @@ export class SwarmfallAdaptiveInput {
   private readonly settings: BindingSettingsController<ActionPayloadMap>;
   private readonly profileStore = new CalibrationProfileStore(window.localStorage);
   private readonly vision: VisionInputChannel;
+  /** Camera speed is layer state; the game only renders and forwards choices. */
+  private readonly visionDevice: VisionDeviceSettings;
   private visionStatus: VisionStatus = 'IDLE';
   private selectedAction: GameAction = SWARMFALL_ACTION_CATALOG[0].id;
   private selectedSource: InputSourceId | null = null;
@@ -100,7 +107,8 @@ export class SwarmfallAdaptiveInput {
     this.adaptive.on('DIRECT_UNITS', (payload) => gameBus.emit('DIRECT_UNITS', payload));
     this.adaptive.bindings.onChange(() => this.refreshSettings());
 
-    const visionTuning = new VisionTuningStore(window.localStorage).load();
+    const visionTuningStore = new VisionTuningStore(window.localStorage);
+    const visionTuning = visionTuningStore.load();
     this.vision = new VisionInputChannel(video, {
       inferenceFps: visionTuning.inferenceFps,
       pointStabilityMs: visionTuning.pointStabilityMs,
@@ -108,6 +116,7 @@ export class SwarmfallAdaptiveInput {
       onStatus: (status, detail) => {
         this.visionStatus = status;
         this.callbacks.onVisionStatus(status, detail);
+        this.refreshDeviceSettings();
         if (status === 'ERROR') {
           if (this.training) {
             this.training = false;
@@ -120,8 +129,28 @@ export class SwarmfallAdaptiveInput {
         if (this.training) this.callbacks.onTrainingDiagnostic(diagnostic);
       },
     });
+    this.visionDevice = new VisionDeviceSettings(this.vision, visionTuningStore);
     this.refreshSettings();
+    this.refreshDeviceSettings();
     void this.restoreSavedBindings();
+  }
+
+  /** Applies immediately and is remembered; the camera need not be running. */
+  selectCameraSpeed(fps: VisionInferenceFps): void {
+    this.callbacks.onDeviceSettingsChanged(this.visionDevice.select(fps));
+  }
+
+  async measureCameraSpeed(): Promise<void> {
+    this.callbacks.onDeviceSettingsChanged(
+      await this.visionDevice.measure(
+        recommendVisionInferenceFps,
+        (view) => this.callbacks.onDeviceSettingsChanged(view),
+      ),
+    );
+  }
+
+  private refreshDeviceSettings(): void {
+    this.callbacks.onDeviceSettingsChanged(this.visionDevice.view());
   }
 
   attemptTouchAction(action: typeof TRIGGER_ACTIONS[number]): void {

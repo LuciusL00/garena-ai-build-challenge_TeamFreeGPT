@@ -1,3 +1,7 @@
+import {
+  VISION_INFERENCE_FPS_OPTIONS,
+  type VisionInferenceFps,
+} from '../../../packages/adaptive-input/src/index.ts';
 import type { GameActionBus } from './actionBus.ts';
 import { BALANCE } from './config/balance.ts';
 import type { StrategyId } from './strategy.ts';
@@ -16,11 +20,18 @@ export interface AdaptiveUiActions {
   resetSelectedBinding(): void;
   startTraining(): Promise<void>;
   stopTraining(): void;
+  selectCameraSpeed(fps: VisionInferenceFps): void;
+  measureCameraSpeed(): Promise<void>;
 }
 
 interface PointerPosition {
   x: number;
   y: number;
+}
+
+function readCameraFps(value: string | undefined): VisionInferenceFps | null {
+  if (value === undefined) return null;
+  return VISION_INFERENCE_FPS_OPTIONS.find((fps) => String(fps) === value) ?? null;
 }
 
 function pointerPosition(event: PointerEvent): PointerPosition {
@@ -85,9 +96,12 @@ export function wireUiInput(
     const eventTarget = event.target;
     if (!(eventTarget instanceof HTMLElement)) return;
     const target = eventTarget.closest<HTMLElement>(
-      '[data-strategy], [data-action], [data-binding-action], [data-input-source]',
+      '[data-strategy], [data-action], [data-binding-action], [data-input-source], [data-camera-fps]',
     );
     if (!target) return;
+
+    const cameraFps = readCameraFps(target.dataset.cameraFps);
+    if (cameraFps !== null) adaptive.selectCameraSpeed(cameraFps);
 
     const strategyId = target.dataset.strategy as StrategyId | undefined;
     if (strategyId) bus.emit('SELECT_STRATEGY', { strategyId });
@@ -114,6 +128,7 @@ export function wireUiInput(
     if (action === 'reset-adaptive-binding') adaptive.resetSelectedBinding();
     if (action === 'start-gesture-training') void adaptive.startTraining();
     if (action === 'stop-gesture-training') adaptive.stopTraining();
+    if (action === 'measure-camera-speed') void adaptive.measureCameraSpeed();
   };
 
   root.addEventListener('click', onClick);

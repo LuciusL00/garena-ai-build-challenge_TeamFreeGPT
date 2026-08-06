@@ -35,16 +35,15 @@ export interface RapidGestureStepResult {
 }
 
 /**
- * Picks the shortest safe prefix; every preceding cue and both bookends must pass.
+ * Picks the shortest safe prefix: the staircase runs from stable to fast, so the
+ * recommendation is the last candidate before the first one that broke.
  *
  * Shorter hold times rarely fail to detect an intended cue — what they lose is
  * safety, so a candidate that would also have fired during a release is rejected.
  */
 export function recommendRapidGestureStabilityMs(
   results: readonly RapidGestureStepResult[],
-  bookends: { readonly startPassed: boolean; readonly endPassed: boolean },
 ): number | null {
-  if (!bookends.startPassed || !bookends.endPassed) return null;
   let recommendation: number | null = null;
   for (const stabilityMs of RAPID_GESTURE_STABILITY_STEPS_MS) {
     const matches = results.filter((result) => result.stabilityMs === stabilityMs);

@@ -12,6 +12,7 @@ import {
   InputChannelId,
   InputSourceId,
   PointDirectionTracker,
+  VisionDeviceSettings,
   VisionInputChannel,
   compareChannelScores,
   VisionTuningStore,
@@ -28,6 +29,9 @@ import type {
   ChannelContext,
   InputChannel,
   ProfileStorage,
+  VisionDeviceTarget,
+  VisionFrameRateProbeResult,
+  VisionInferenceFps,
 } from '../index.ts';
 
 type EmptyPayload = Record<string, never>;
@@ -85,6 +89,24 @@ class FakeChannel implements InputChannel {
     if (!this.active) return;
     this.stopCount += 1;
     this.active = false;
+  }
+}
+
+/** Stands in for a running camera so the device setting can be checked offline. */
+class FakeVisionDevice implements VisionDeviceTarget {
+  isActive = true;
+  requestedInferenceFps: VisionInferenceFps = 15;
+
+  setInferenceFps(fps: VisionInferenceFps): void {
+    this.requestedInferenceFps = fps;
+  }
+
+  measureInferenceFps(): Promise<readonly VisionFrameRateProbeResult[]> {
+    return Promise.resolve([
+      { requestedFps: 10, effectiveFps: 9.8, medianInferenceDurationMs: 20, sampleCount: 10 },
+      { requestedFps: 12, effectiveFps: 11.7, medianInferenceDurationMs: 24, sampleCount: 12 },
+      { requestedFps: 15, effectiveFps: 11.5, medianInferenceDurationMs: 25, sampleCount: 15 },
+    ]);
   }
 }
 
@@ -719,7 +741,7 @@ async function main(): Promise<void> {
   }));
   check(
     'rapid tuner recommends the shortest setting only when every cue passes',
-    recommendRapidGestureStabilityMs(completeRapidRun, { startPassed: true, endPassed: true }) === 120,
+    recommendRapidGestureStabilityMs(completeRapidRun) === 120,
   );
   check(
     'rapid tuner stops at the first failed cue even if a later cue passes',
@@ -727,7 +749,6 @@ async function main(): Promise<void> {
       completeRapidRun.map((result) => result.stabilityMs === 200
         ? { ...result, cueDetected: false }
         : result),
-      { startPassed: true, endPassed: true },
     ) === 240,
   );
   check(
@@ -736,12 +757,15 @@ async function main(): Promise<void> {
       completeRapidRun.map((result) => result.stabilityMs === 160
         ? { ...result, accidentalActivation: true }
         : result),
-      { startPassed: true, endPassed: true },
     ) === 200,
   );
   check(
-    'rapid tuner rejects a run when either slow bookend fails',
-    recommendRapidGestureStabilityMs(completeRapidRun, { startPassed: true, endPassed: false }) === null,
+    'rapid tuner saves nothing when even the longest hold failed',
+    recommendRapidGestureStabilityMs(
+      completeRapidRun.map((result) => result.stabilityMs === 320
+        ? { ...result, cueDetected: false }
+        : result),
+    ) === null,
   );
 
   check(
@@ -758,6 +782,35 @@ async function main(): Promise<void> {
       { requestedFps: 15, effectiveFps: 15, medianInferenceDurationMs: 10, sampleCount: 4 },
     ]) === null,
   );
+
+  console.log('\nDevice-wide camera speed setting');
+  const deviceTarget = new FakeVisionDevice();
+  const deviceStore = new VisionTuningStore(new MemoryProfileStorage());
+  const deviceSettings = new VisionDeviceSettings(deviceTarget, deviceStore);
+  check(
+    'camera speed offers every supported rate as one device-wide choice',
+    deviceSettings.view().options.length === 3 && deviceSettings.view().selected === 15,
+  );
+  deviceTarget.isActive = false;
+  const manualView = deviceSettings.select(10);
+  check('a rate can be chosen manually while the camera is off', manualView.selected === 10);
+  check('a manual choice is persisted for every visual input', deviceStore.load().inferenceFps === 10);
+  check('manual choice is reported as the player’s own', manualView.origin === 'MANUAL');
+  check('measuring is unavailable until the camera runs', !manualView.measurable);
+  const refusedView = await deviceSettings.measure(recommendVisionInferenceFps);
+  check('measuring with the camera off changes nothing', refusedView.selected === 10);
+  deviceTarget.isActive = true;
+  const measuredView = await deviceSettings.measure(recommendVisionInferenceFps);
+  check('a measurement applies the fastest sustained rate', measuredView.selected === 12);
+  check('a measured choice is persisted too', deviceStore.load().inferenceFps === 12);
+  check(
+    'each rate reports what it actually achieved',
+    measuredView.options.find((option) => option.fps === 12)?.measured?.effectiveFps === 11.7,
+  );
+  check('a measured choice is reported as measured', measuredView.origin === 'MEASURED');
+  checkThrows('an unsupported camera rate is rejected', () => {
+    deviceSettings.select(30 as VisionInferenceFps);
+  });
 
   checkThrows('vision timing options reject values above their bound', () => {
     new VisionInputChannel({} as HTMLVideoElement, { gestureTiming: { stabilityMs: 2_001 } });

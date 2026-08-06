@@ -7,10 +7,16 @@ import type {
   CalibrationTask,
 } from './actions.ts';
 import type { AdaptiveInput } from './bus.ts';
-import type { CalibrationProfile } from './profile.ts';
+import type {
+  CalibrationProfile,
+  VisionInferenceFps,
+  VisionTuningPreferences,
+} from './profile.ts';
+import { VISION_INFERENCE_FPS_OPTIONS } from './profile.ts';
 import { ControlRecommender } from './recommendation/recommender.ts';
 import type { Recommendation } from './recommendation/types.ts';
 import type { InputSourceId } from './sources.ts';
+import type { VisionFrameRateProbeResult } from './vision/visionInputChannel.ts';
 
 export type InputSourceScope = 'TARGETED' | 'GLOBAL';
 
@@ -68,6 +74,135 @@ export interface BindingChangePreview<A extends ActionId = ActionId> {
   conflicts: readonly BindingConflict<A>[];
   recommendation: Recommendation<A>;
   readyToApply: boolean;
+}
+
+/** How a measured rate was chosen, so the host can say which it is showing. */
+export type VisionDeviceOrigin = 'DEFAULT' | 'MANUAL' | 'MEASURED';
+
+export interface VisionDeviceOptionView {
+  fps: VisionInferenceFps;
+  selected: boolean;
+  /** Present once this rate has been measured on this device. */
+  measured?: { effectiveFps: number; inferenceDurationMs: number };
+}
+
+export interface VisionDeviceSettingsView {
+  options: readonly VisionDeviceOptionView[];
+  selected: VisionInferenceFps;
+  origin: VisionDeviceOrigin;
+  /** A measurement needs a running camera; manual selection never does. */
+  measurable: boolean;
+  measuring: boolean;
+  detail: string;
+}
+
+/** The part of a vision channel these settings drive, kept free of the model. */
+export interface VisionDeviceTarget {
+  readonly isActive: boolean;
+  readonly requestedInferenceFps: VisionInferenceFps;
+  setInferenceFps(fps: VisionInferenceFps): void;
+  measureInferenceFps(): Promise<readonly VisionFrameRateProbeResult[]>;
+}
+
+export interface VisionTuningPersistence {
+  load(): VisionTuningPreferences;
+  save(preferences: VisionTuningPreferences): void;
+}
+
+/**
+ * Camera processing rate as a device-wide setting. It is one rate for every
+ * visual input, so it belongs beside the game's other options rather than
+ * inside any single input's calibration. Games render this view; they never
+ * reach past it to the camera.
+ */
+export class VisionDeviceSettings {
+  private origin: VisionDeviceOrigin = 'DEFAULT';
+  private measuring = false;
+  private results: readonly VisionFrameRateProbeResult[] = [];
+  private detail = 'One rate is used by every camera input on this device.';
+
+  constructor(
+    private readonly target: VisionDeviceTarget,
+    private readonly store: VisionTuningPersistence,
+  ) {}
+
+  view(): VisionDeviceSettingsView {
+    const selected = this.target.requestedInferenceFps;
+    return {
+      options: VISION_INFERENCE_FPS_OPTIONS.map((fps) => {
+        const measured = this.results.find((result) => result.requestedFps === fps);
+        return {
+          fps,
+          selected: fps === selected,
+          ...(measured
+            ? {
+                measured: {
+                  effectiveFps: measured.effectiveFps,
+                  inferenceDurationMs: measured.medianInferenceDurationMs,
+                },
+              }
+            : {}),
+        };
+      }),
+      selected,
+      origin: this.origin,
+      measurable: this.target.isActive && !this.measuring,
+      measuring: this.measuring,
+      detail: this.detail,
+    };
+  }
+
+  /** Direct player choice. Allowed with the camera off; it applies on next start. */
+  select(fps: VisionInferenceFps): VisionDeviceSettingsView {
+    if (this.measuring) return this.view();
+    if (!VISION_INFERENCE_FPS_OPTIONS.includes(fps)) {
+      throw new RangeError(`${fps} is not a supported camera processing rate.`);
+    }
+    this.apply(fps, 'MANUAL', `${fps} FPS selected for every camera input on this device.`);
+    return this.view();
+  }
+
+  /** Measures each supported rate, then applies the fastest one sustained. */
+  async measure(
+    recommend: (results: readonly VisionFrameRateProbeResult[]) => VisionInferenceFps | null,
+    onChange?: (view: VisionDeviceSettingsView) => void,
+  ): Promise<VisionDeviceSettingsView> {
+    if (this.measuring) return this.view();
+    if (!this.target.isActive) {
+      this.detail = 'Turn the camera on before measuring what this device sustains.';
+      return this.view();
+    }
+    this.measuring = true;
+    this.detail = 'Measuring 10, 12 and 15 FPS. Keep your hand in view and move it gently.';
+    onChange?.(this.view());
+    try {
+      this.results = await this.target.measureInferenceFps();
+      const recommended = recommend(this.results);
+      if (recommended === null) {
+        this.detail = 'No rate produced enough steady samples. Your current choice was kept.';
+      } else {
+        this.apply(
+          recommended,
+          'MEASURED',
+          `${recommended} FPS measured as the fastest rate this device sustains.`,
+        );
+      }
+    } catch (error: unknown) {
+      this.detail = error instanceof Error
+        ? error.message
+        : 'The camera speed could not be measured.';
+    } finally {
+      this.measuring = false;
+    }
+    return this.view();
+  }
+
+  private apply(fps: VisionInferenceFps, origin: VisionDeviceOrigin, detail: string): void {
+    this.target.setInferenceFps(fps);
+    this.store.save({ ...this.store.load(), inferenceFps: fps });
+    this.origin = origin;
+    this.detail = detail;
+  }
 }
 
 /**
