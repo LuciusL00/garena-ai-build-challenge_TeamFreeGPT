@@ -133,6 +133,8 @@ export default function CalibrationClient() {
   const diagnosticSequenceRef = useRef(0);
   const pointGapRef = useRef<PointGapCollector | null>(null);
   const tuningModeRef = useRef<TuningMode>(null);
+  const labGridRef = useRef<HTMLElement>(null);
+  const cameraPanelRef = useRef<HTMLElement>(null);
 
   const [selection, setSelection] = useState<CalibrationSelection>(DEFAULT_SELECTION);
   const [visionStatus, setVisionStatus] = useState<VisionStatus>('IDLE');
@@ -277,6 +279,28 @@ export default function CalibrationClient() {
       visionTuning.gestureStabilityMs[tuningSource] ?? DEFAULT_GESTURE_COMMAND_CONFIG.stabilityMs,
     );
   }, [tuningSource, visionTuning]);
+
+  /**
+   * On narrow screens the live camera bar is pinned to the top and the cue is
+   * pinned directly beneath it, so the cue's offset is the bar's measured height.
+   * Guessing that height clips the bar or leaves a seam, so it is measured.
+   */
+  useEffect(() => {
+    const grid = labGridRef.current;
+    if (!grid) return;
+    const panel = cameraPanelRef.current;
+    if (!panel || visionStatus !== 'READY') {
+      grid.style.setProperty('--camera-bar', '0px');
+      return;
+    }
+    const sync = (): void => {
+      grid.style.setProperty('--camera-bar', `${Math.round(panel.getBoundingClientRect().height)}px`);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [visionStatus, cameraNeeded, selection.task]);
 
   const startCamera = async (): Promise<void> => {
     try {
@@ -725,35 +749,43 @@ export default function CalibrationClient() {
         />
       </section>
 
-      <section className={`lab-grid ${cameraNeeded ? '' : 'single-column'}`}>
+      <section className={`lab-grid ${cameraNeeded ? '' : 'single-column'}`} ref={labGridRef}>
         {cameraNeeded && (
-          <article className="lab-panel">
+          <article
+            className={`lab-panel camera-panel ${visionStatus === 'READY' ? 'live' : ''}`}
+            ref={cameraPanelRef}
+          >
             <div className="panel-title">
               <h2>Camera input</h2>
               <span className={`vision-status ${visionStatus.toLowerCase()}`}>{visionStatus}</span>
             </div>
-            <div className="camera-frame">
-              <video ref={videoRef} playsInline muted />
-              {visionStatus !== 'READY' && <div className="camera-placeholder">Camera preview</div>}
+            <div className="camera-row">
+              <div className="camera-frame">
+                <video ref={videoRef} playsInline muted />
+                {visionStatus !== 'READY' && <div className="camera-placeholder">Camera preview</div>}
+              </div>
+              <div className="camera-readout">
+                <div className="reading-row">
+                  <span>Detected input</span>
+                  <strong>{direction ? 'Point direction' : detectedSource ? sourceLabel(detectedSource) : 'Neutral'}</strong>
+                </div>
+                <div className="reading-row">
+                  <span>Detector state</span>
+                  <strong>{detectorState}</strong>
+                </div>
+                <div className="confidence-track">
+                  <i style={{ width: `${Math.round(detectorConfidence * 100)}%` }} />
+                </div>
+                <div className="button-row">
+                  <button data-calibration-control onClick={() => void startCamera()}>Enable camera</button>
+                  <button data-calibration-control onClick={() => visionRef.current?.stop()}>Stop camera</button>
+                </div>
+              </div>
             </div>
-            <p>{visionDetail}</p>
-            <div className="reading-row">
-              <span>Detected input</span>
-              <strong>{direction ? 'Point direction' : detectedSource ? sourceLabel(detectedSource) : 'Neutral'}</strong>
-            </div>
-            <div className="reading-row">
-              <span>Detector state</span>
-              <strong>{detectorState}</strong>
-            </div>
-            <div className="confidence-track">
-              <i style={{ width: `${Math.round(detectorConfidence * 100)}%` }} />
-            </div>
-            <DirectionDiagnostic direction={direction} />
-            <div className="button-row">
-              <button data-calibration-control onClick={() => void startCamera()}>Enable camera</button>
-              <button data-calibration-control onClick={() => visionRef.current?.stop()}>Stop camera</button>
-            </div>
-            <small className="skip-note">
+            {/* Once the camera is ready the status chip says so; the copy only repeats it. */}
+            {visionStatus !== 'READY' && <p>{visionDetail}</p>}
+            {selection.task === 'DIRECTION' && <DirectionDiagnostic direction={direction} />}
+            <small className="skip-note camera-note">
               Camera speed is one setting for every visual input, so it lives in the game&apos;s
               Controls panel rather than in any single input&apos;s test.
             </small>

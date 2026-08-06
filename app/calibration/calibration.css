@@ -26,20 +26,25 @@
 .source-card > small { grid-row: 3; color: var(--muted); }
 .source-card > button { grid-column: 2; grid-row: 1 / span 3; }
 .source-card.active { border-color: var(--cyan); box-shadow: inset 0 0 35px rgba(110,231,255,.08); }
-.lab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+/* Panels keep their own height: the camera panel is short and should stay short. */
+.lab-grid { --camera-bar: 0px; display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 18px; }
 .lab-grid.single-column { grid-template-columns: 1fr; }
 .lab-panel { padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.24); }
 .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .panel-title h2 { margin: 0; font-size: 20px; }
+/* The preview only has to show where your hand is, so it stays beside the readings. */
+.camera-row { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: start; }
 .camera-frame { position: relative; overflow: hidden; aspect-ratio: 4/3; border-radius: 14px; background: #02070b; }
 .camera-frame video { display: block; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-.camera-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: #617887; }
+.camera-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: #617887; font-size: 13px; }
+.camera-readout { display: grid; align-content: start; gap: 2px; }
+.camera-readout .button-row button { flex: 1; padding: 9px 8px; white-space: nowrap; }
 .vision-status { padding: 5px 9px; border-radius: 999px; color: var(--muted); background: #172b38; font-size: 12px; font-weight: 800; }
 .vision-status.ready { color: var(--green); background: #113a31; }
 .vision-status.denied, .vision-status.error { color: var(--red); background: #3d2227; }
-.reading-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #1b3545; }
+.reading-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; padding: 8px 0; border-bottom: 1px solid #1b3545; }
 .reading-row span { color: var(--muted); }
-.confidence-track { height: 5px; margin: 8px 0 14px; overflow: hidden; border-radius: 99px; background: #172b38; }
+.confidence-track { height: 5px; margin: 10px 0; overflow: hidden; border-radius: 99px; background: #172b38; }
 .confidence-track i { display: block; width: 0; height: 100%; background: var(--green); transition: width .12s linear; }
 .direction-diagnostic { display: flex; align-items: center; gap: 14px; min-height: 64px; margin: 10px 0; padding: 10px 14px; border: 1px solid #1b3545; border-radius: 12px; background: #091620; }
 .direction-arrow { display: inline-grid; place-items: center; width: 38px; height: 38px; color: #617887; font-size: 34px; transform-origin: center; transition: transform .12s linear, color .12s linear; }
@@ -116,14 +121,60 @@
 .recommendation.retest { border-color: #91404b; background: rgba(114, 43, 53, .15); }
 .review-binding { display: inline-flex; align-items: center; min-height: 46px; margin-top: 14px; padding: 10px 16px; border-radius: 10px; color: #061016; background: var(--green); font-weight: 800; text-decoration: none; }
 @media (max-width: 760px) {
-  .calibration-lab { padding-top: 20px; }
-  .lab-grid, .source-cards, .direction-result-grid, .tuning-grid { grid-template-columns: 1fr; }
-  .source-card { grid-template-columns: 1fr; }
-  .source-card > button { grid-column: 1; grid-row: 4; margin-top: 8px; }
+  .calibration-lab { padding-top: 16px; }
+  /* Block layout, not a one-column grid: a sticky grid item cannot leave its row. */
+  .lab-grid { display: block; }
+  .direction-result-grid, .tuning-grid { grid-template-columns: 1fr; }
+  .lab-panel { padding: 14px; }
+  /* The intro is reference text, not the task: it keeps its words but not the screen. */
+  .lab-header { margin-bottom: 14px; }
+  .lab-header span { margin-top: 12px; font-size: 11px; }
+  .lab-header h1 { margin: 4px 0 8px; font-size: clamp(24px, 7vw, 30px); letter-spacing: -.03em; }
+  .lab-header p { font-size: 12px; line-height: 1.45; }
+
+  /* Both inputs side by side: they are a comparison, not two separate screens. */
+  .source-cards { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .source-card { grid-template-columns: 1fr; gap: 3px; padding: 12px; }
+  .source-card > span { font-size: 10px; }
+  .source-card > strong { grid-row: auto; font-size: 16px; line-height: 1.15; }
+  .source-card > small { grid-row: auto; font-size: 11px; }
+  .source-card > button {
+    grid-column: 1; grid-row: auto; width: 100%; margin-top: 8px;
+    min-height: 40px; padding: 8px 6px; font-size: 12px;
+  }
+
+  /* Once the camera is live it becomes a fixed-height bar pinned to the top, and
+     the cue pins directly beneath it. Seeing your own hand and reading the cue
+     stop competing for the same screen. */
+  .camera-panel { margin-bottom: 12px; padding: 10px 12px; }
+  .camera-panel.live {
+    position: sticky; top: 0; z-index: 20;
+    margin-bottom: 0;
+    background: rgba(7, 16, 25, .97);
+    backdrop-filter: blur(8px);
+  }
+  .camera-panel .panel-title { margin-bottom: 8px; }
+  .camera-panel .panel-title h2 { font-size: 15px; }
+  .camera-row { grid-template-columns: 100px 1fr; gap: 10px; }
+  .camera-frame { border-radius: 10px; }
+  .camera-panel .reading-row { padding: 3px 0; font-size: 12px; }
+  .camera-panel .confidence-track { margin: 6px 0; }
+  .camera-panel .button-row { margin-top: 6px; gap: 6px; }
+  .camera-panel .button-row button { flex: 1; min-height: 36px; padding: 6px; font-size: 12px; white-space: nowrap; }
+  .camera-panel > p { margin: 10px 0 0; font-size: 13px; }
+  .camera-note { display: none; }
+
+  /* Pinned flush under the camera bar, so nothing scrolls through the seam. */
+  .test-cue {
+    position: sticky; top: var(--camera-bar); z-index: 15;
+    min-height: 96px; font-size: clamp(26px, 8vw, 36px);
+  }
+  .camera-panel.live + .test-panel { padding-top: 12px; }
   .panel-title { align-items: flex-start; }
   .direction-metrics { grid-template-columns: 1fr 1fr; }
   .probe-results { grid-template-columns: 1fr; }
   .rapid-results { grid-template-columns: repeat(3, 1fr); }
   .tuning-heading { align-items: stretch; flex-direction: column; }
   .tuning-heading button { width: 100%; }
+  .comparison-table { min-width: 520px; }
 }
