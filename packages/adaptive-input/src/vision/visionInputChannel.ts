@@ -11,10 +11,11 @@ import {
 import { PointDirectionTracker, type DirectionVector } from './pointDirection.ts';
 
 export const MEDIAPIPE_TASKS_VISION_VERSION = '0.10.35';
-export const MEDIAPIPE_WASM_URL =
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
+export const MEDIAPIPE_WASM_URL = '/mediapipe/wasm';
 export const GESTURE_RECOGNIZER_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+  '/mediapipe/models/gesture_recognizer.task';
+
+const DEFAULT_INFERENCE_FPS = 15;
 
 export type VisionStatus = 'IDLE' | 'REQUESTING' | 'LOADING' | 'READY' | 'ERROR';
 export interface VisionTimingDiagnostic {
@@ -218,7 +219,7 @@ export class VisionInputChannel implements InputChannel {
         modelStartupDurationMs: modelReadyAt - modelStartedAt,
         totalStartupDurationMs: modelReadyAt - startupStartedAt,
       };
-      const fps = Math.max(10, Math.min(15, this.options.inferenceFps ?? 12));
+      const fps = Math.max(10, Math.min(15, this.options.inferenceFps ?? DEFAULT_INFERENCE_FPS));
       this.timer = window.setInterval(() => this.infer(), 1000 / fps);
       this.report('READY', 'Camera ready. Processing stays on this device.');
     } catch (error: unknown) {
@@ -255,17 +256,21 @@ export class VisionInputChannel implements InputChannel {
       const gestures = result.gestures[0] ?? [];
       const candidates = triggerCandidates(gestures);
       const detectedCommand = highestConfidenceGestureCommand(candidates);
+      const directionBlockingCommand = detectedCommand !== null &&
+        detectedCommand.confidence >= DEFAULT_GESTURE_COMMAND_CONFIG.enterConfidence
+        ? detectedCommand
+        : null;
       const gatedCommand = this.triggerFocus === null
         ? detectedCommand
         : candidates.find((candidate) => candidate.source === this.triggerFocus) ?? null;
       this.commandGate.update(timestamp, gatedCommand);
 
       let direction: DirectionVector | null = null;
-      if (detectedCommand !== null) {
+      if (directionBlockingCommand !== null) {
         if (this.pointing) this.emitPointingEnd(timestamp);
         else this.point.reset();
       } else {
-        direction = result.landmarks[0] ? this.point.update(result.landmarks[0]) : null;
+        direction = this.point.update(result.landmarks[0] ?? [], timestamp);
         if (direction) {
           this.pointing = true;
           this.context?.emit({ kind: 'direction', source: InputSourceId.HAND_POINT_DIRECTION, timestamp, direction });

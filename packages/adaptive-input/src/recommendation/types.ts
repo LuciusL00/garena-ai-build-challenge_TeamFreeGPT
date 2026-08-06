@@ -43,6 +43,9 @@ export interface ChannelScoreComparison {
   success: MetricComparison;
   latency: MetricComparison;
   falseActivations: MetricComparison;
+  angularError: MetricComparison;
+  jitter: MetricComparison;
+  dropouts: MetricComparison;
   overall: OverallComparison;
 }
 
@@ -90,6 +93,14 @@ export interface RecommendationResult<A extends ActionId = ActionId> {
 
 export const RULES = {
   MIN_USABLE_SUCCESS_RATE: 0.5,
+  MIN_SUCCESS_DIFFERENCE_TRIALS: 2,
   MIN_LATENCY_DIFFERENCE_MS: 100,
   MIN_LATENCY_DIFFERENCE_RATIO: 0.15,
+  MIN_FALSE_ACTIVATION_OBSERVATION_MS: 10_000,
+  MIN_FALSE_ACTIVATION_COUNT_DIFFERENCE: 2,
+  MIN_ANGULAR_ERROR_DIFFERENCE_DEG: 5,
+  MIN_ANGULAR_ERROR_DIFFERENCE_RATIO: 0.15,
+  MIN_JITTER_DIFFERENCE_DEG: 3,
+  MIN_JITTER_DIFFERENCE_RATIO: 0.2,
+  MIN_DROPOUT_DIFFERENCE: 2,
 } as const;

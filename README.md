@@ -9,7 +9,7 @@ touch and on-device hand input through one typed boundary.
 For each player, the layer can:
 
 1. Measure compatible input sources with the same prompted task.
-2. Compare success, reaction latency and false activations.
+2. Compare success, reaction latency, false activations and directional quality where relevant.
 3. Explain whether one input measured better or whether the result is a trade-off.
 4. Apply a new binding only after the player approves it.
 5. Keep the game's original touch control available as the safe default.
@@ -20,6 +20,8 @@ The current MVP uses transparent comparison rules rather than an LLM.
 ## Live demo
 
 [Play Swarmfall](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site)
+
+[Open the minimal portability host](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site/portability)
 
 Swarmfall is the reference host, not the product. Its remappable actions are Gather, Spread,
 Switch squad and Direct units. Touch provides every original action; closed fist, open palm,
@@ -70,7 +72,8 @@ demos/
 
 app/
 ├── page.tsx            Swarmfall web route
-└── calibration/        web calibration screen used by the reference host
+├── calibration/        web calibration screen used by the reference host
+└── portability/        independent one-action host proving the package boundary
 ```
 
 `packages/adaptive-input/` never imports from `demos/`. A host imports the layer and translates
@@ -122,7 +125,7 @@ Read these in this order:
 | [STATUS.md](STATUS.md) | Current implementation, ownership, known gaps and handoff state |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current system boundaries and data flow |
 | [PLAN.md](PLAN.md) | Initial planning baseline plus a record of what changed |
-| [DISCLOSURE.md](DISCLOSURE.md) | Libraries, models, runtime downloads and external services |
+| [DISCLOSURE.md](DISCLOSURE.md) | Libraries, model assets and hosted services |
 | [CONSIDERATIONS.md](CONSIDERATIONS.md) | Assumptions and design questions; some entries are historical |
 
 When a historical PLAN statement conflicts with STATUS, ARCHITECTURE or the code, the current
@@ -137,7 +140,8 @@ Shipped:
 - Typed action registration and runtime binding gate
 - Pre-gate telemetry
 - Trigger and direction calibration
-- Saved player profile, side-by-side comparison and explicit binding approval
+- Saved player profile, conservative side-by-side comparison and explicit binding approval
+- A second minimal host with no Swarmfall imports
 - Camera failure fallback to touch
 
 Deferred:
@@ -151,8 +155,8 @@ Deferred:
 ## Privacy and limitations
 
 Camera processing stays on the player's device. The browser stores derived calibration scores and
-bindings in local storage. The MediaPipe WebAssembly runtime and published gesture model are
-downloaded from the pinned URLs listed in [DISCLOSURE.md](DISCLOSURE.md).
+bindings in local storage. The pinned MediaPipe WebAssembly runtime and published gesture model
+are served by the application from the vendored files listed in [DISCLOSURE.md](DISCLOSURE.md).
 
 Saved measurements describe one device and testing context. Lighting, grip, camera angle or the
 player's condition may later change, so the player can retest instead of treating an old result as

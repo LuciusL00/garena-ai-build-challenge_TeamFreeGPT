@@ -23,7 +23,7 @@ game-agnostic adaptive-input layer is the product.
 - Review target: `integration/adaptive-controls-mvp`
 - Integration baseline: `99446a3` (`Add dynamic vision calibration inputs`), which already
   contains the earlier `eaf356b` four-control demo work.
-- Latest local commit: `f817b49` (`fix: scale squad zones for mobile arenas`).
+- Latest committed baseline: `f1f1e43` (`docs: align integration guidance with current mvp`).
 - This branch combines the tracks for review. It does not replace Vivin's vision branch, Mark's
   demo branch or `main` before approval.
 
@@ -38,14 +38,15 @@ game-agnostic adaptive-input layer is the product.
 | Visual direction | Complete locally | Pointing emits normalized direction and explicit direction-ended signals. |
 | Trigger calibration | Complete locally | Six-trial quick and twelve-trial full modes; WAIT activations are counted. |
 | Direction calibration | Complete locally | Eight randomized cues; latency, angular error, jitter and dropouts are shown. |
-| Score memory and recommendation | Complete locally | Results persist by neutral task and input source; comparisons remain transparent. |
+| Score memory and recommendation | Complete locally | Conservative comparisons use task-relevant trigger or direction evidence and explain requirement cautions. |
 | Binding settings | Complete locally | Choose action and input, test or skip, review, accept, keep or restore default. |
 | Runtime rebind | Complete locally | Phone smoke tests confirmed bindings change and survive refresh. |
 | Gesture training | Complete locally | Live camera feedback previews gather, spread, switch and direction without rebinding. |
 | Mobile Swarmfall host | Complete locally; review pending | Directional control, optional tactics, responsive zones and phone layout are working. |
+| Minimal portability host | Complete locally | `/portability` registers an independent typed action with touch/fist rebinding and no Swarmfall imports. |
 | Control comparison and live validation | Complete locally | Touch and alternative-input measurements are compared before approval; the accepted binding is then verified in gameplay. |
 | Runtime input feedback | Complete locally | Gameplay shows detected input, confidence and mapped action. Reaction latency is measured only during prompted calibration. |
-| HTTPS deployment | Temporary | The Cloudflare review tunnel works but is not a durable submission deployment. |
+| HTTPS deployment | Stable origin available | The Sites URL responds over HTTPS; the latest integration changes still require publication. |
 | Formal integration | Pending | Team review, shared-branch verification and merge to `main` are planned for 7 August. |
 
 ## Changes since integration baseline `99446a3`
@@ -68,6 +69,8 @@ game-agnostic adaptive-input layer is the product.
   boundaries and initial local ore placement while preserving desktop sizing.
 - Kept gameplay input abstract: simulation code consumes typed actions and does not read touch or
   camera APIs directly.
+- Made mining use elapsed time instead of rendered-frame count so extraction speed is consistent
+  across phone and laptop frame rates.
 
 ### Adaptive binding and control flow
 
@@ -101,6 +104,10 @@ game-agnostic adaptive-input layer is the product.
   neutral pose between every command.
 - Keep the design open for a future gate per tracked hand; two-hand inference is not implemented.
 - Added calibration focus so an unrelated recognized pose cannot lock the trigger being tested.
+- Added pointing-entry/hold hysteresis, a four-degree direction dead zone and a short landmark-loss
+  grace period to reduce visible jitter and unintended movement stops.
+- Self-hosted the pinned MediaPipe runtime and Gesture Recognizer model so camera startup no
+  longer depends on a third-party runtime CDN.
 
 ### Calibration, recommendation and training
 
@@ -113,6 +120,10 @@ game-agnostic adaptive-input layer is the product.
 - Store reusable results by task and input source in browser storage.
 - Show both controls side by side and declare a winner only when it has no measured disadvantage;
   mixed results remain a visible player choice.
+- Require a two-prompt success difference in Quick Test, prevent one accidental activation from
+  deciding a winner, and compare angular error, jitter and dropouts for direction actions.
+- Require comparable latency or precision evidence when the host marks that requirement instead
+  of producing an automatic recommendation from incomplete evidence.
 - Added camera training that previews gesture effects without changing live bindings.
 - Corrected training feedback and initial unit positions so Gather and Spread visibly react.
 
@@ -125,6 +136,8 @@ game-agnostic adaptive-input layer is the product.
 - Gesture stability, cooldown, confidence boundary, fire-once, neutral re-arm and direct pose
   transitions.
 - Vision calibration focus and direction-source rejection for trigger calibration.
+- Quick-test sensitivity, repeated false activations, requirement evidence and directional
+  quality comparisons.
 
 ### Integration commits after `99446a3`
 
@@ -141,6 +154,7 @@ game-agnostic adaptive-input layer is the product.
 | `ecf2f0a` | Correct gesture-training feedback and preview reactions. |
 | `c455794` | Allow direct stable transitions between different gesture commands. |
 | `f817b49` | Scale squad zones and related behavior for narrow mobile arenas. |
+| `f1f1e43` | Align current documentation and remove orphaned prototype files. |
 
 ## Phone smoke-test record
 
@@ -163,17 +177,15 @@ system and browser version still need to be recorded for the submission.
 
 ## Known gaps and integration checks
 
-1. Mining currently applies a fixed amount per rendered frame instead of multiplying by elapsed
-   time. Compare phone and laptop extraction speed and correct it before freeze.
-2. Confirm whether restored touch bindings after a camera failure are also persisted across the
+1. Confirm whether restored touch bindings after a camera failure are also persisted across the
    next reload.
-3. Confirm the calibration-to-controls navigation and accepted binding once more after formal
+2. Confirm the calibration-to-controls navigation and accepted binding once more after formal
    integration; a separate post-binding calibration rerun is not required.
-4. Record phone model, OS, browser, lighting, left/right point signs and repeated camera-stop
+3. Record phone model, OS, browser, lighting, left/right point signs and repeated camera-stop
    indicator behavior.
-5. Deploy a stable HTTPS submission URL after merging the reviewed branch.
-6. Update README, architecture/disclosure notes and the five-minute video script after behavior is
-   frozen.
+4. Publish the latest integration build to the stable Sites origin and verify its local MediaPipe
+   assets on a phone.
+5. Finish the five-minute video script after behavior is frozen.
 
 ## Ownership during review
 
@@ -197,9 +209,9 @@ currently allowed to run an action. The game alone decides what that action does
 
 | Tier | Contents | Status |
 |---|---|---|
-| **T0** | Discrete live rebind, touch/visual calibration, recommendation, approval and mobile HTTPS demo | Functionally end to end locally; review, final validation and stable deployment pending |
+| **T0** | Discrete live rebind, touch/visual calibration, recommendation, approval and mobile HTTPS demo | Functionally complete locally; latest stable deployment and final validation pending |
 | **T1** | Point direction, direction-ended signal, direction calibration and additional mappings | Implemented locally; formal integration review pending |
-| **T2** | Second host proving portability | Not started; cut unless T0 is frozen early |
+| **T2** | Second host proving portability | Minimal independent one-action host implemented at `/portability` |
 | **T3** | Extra channels, two-hand vision or custom gestures | Not started |
 
 Natural-language mapping and generated strategy remain deferred. If natural-language mapping is

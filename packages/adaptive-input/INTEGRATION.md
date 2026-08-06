@@ -73,9 +73,14 @@ remove working touch input.
 - `DIRECTION`: a held relative direction such as a joystick or hand pointing
 - `POINT`: an absolute normalized position; designed in the contract but not used by Swarmfall
 
-`spatial` and `latencyCritical` are host metadata seams. The current recommender does not apply
-automatic weighting from those two flags; it compares the measured metrics and leaves visible
-trade-offs to the player.
+The recommender uses the requirements without hiding them in a weighted total:
+
+- `task` filters compatible sources and chooses the reusable benchmark.
+- Direction tasks compare angular error, jitter and dropouts as well as success and latency.
+- `latencyCritical` requires comparable response-time evidence and explains measured latency.
+- `spatial` requires comparable precision evidence instead of guessing when it is missing.
+
+The player may still explicitly skip testing and override the recommendation.
 
 Keep fixed actions outside the remappable catalog, or register them with `remappable: false`.
 Swarmfall keeps Begin and Restart on its original touch/click path.
@@ -216,6 +221,11 @@ to the same profile slot, so saving a Quick Test replaces the previous result. T
 player. The full test is the intended comparison; the quick mode is a preview for development and
 short demonstrations.
 
+The comparison is deliberately conservative: a six-prompt Quick Test needs a two-prompt success
+difference before that metric declares an advantage. One accidental activation remains visible
+but does not decide the overall result by itself. Direction recommendations also use angular
+error, jitter and dropout evidence.
+
 ## 7. Manage camera lifecycle
 
 Register platform channels with `ChannelManager`. After a binding changes, reconcile against
@@ -231,6 +241,9 @@ Stopping vision must release the media stream and processing loop.
 
 The camera preview is useful during calibration and gesture training. It does not need to cover
 the game during normal play.
+
+The reference web build self-hosts the pinned MediaPipe runtime and model at `/mediapipe/`, so
+camera startup does not depend on a third-party runtime CDN.
 
 ## 8. Persist host bindings separately
 

@@ -533,7 +533,7 @@ class SwarmfallGame {
     this.assignTargets();
     this.updateAsteroids(delta);
     this.updateUnits(delta);
-    this.resolveCollisions();
+    this.resolveCollisions(delta);
     this.state.effects = this.state.effects.filter((effect) => {
       effect.age += delta;
       return effect.age < BALANCE.effectSeconds;
@@ -782,7 +782,7 @@ class SwarmfallGame {
     return candidate;
   }
 
-  private resolveCollisions(): void {
+  private resolveCollisions(delta: number): void {
     for (const guard of this.state.units.filter((unit) => unit.kind === 'GUARD')) {
       for (const asteroid of this.state.asteroids) {
         if (distance(guard.position, asteroid.position) > BALANCE.unitRadius + asteroid.radius) continue;
@@ -805,7 +805,11 @@ class SwarmfallGame {
       if (!harvester.returning) {
         const deposit = findDeposit(this.state, harvester.targetId);
         if (deposit && distance(harvester.position, deposit.position) < BALANCE.unitRadius + deposit.radius) {
-          const mined = Math.min(BALANCE.miningRate / 60, deposit.ore, BALANCE.harvesterCargoCapacity - harvester.cargo);
+          const mined = Math.min(
+            BALANCE.miningRate * delta,
+            deposit.ore,
+            BALANCE.harvesterCargoCapacity - harvester.cargo,
+          );
           deposit.ore -= mined;
           harvester.cargo += mined;
           deposit.radius = Math.max(4, deposit.baseRadius * (deposit.ore / deposit.maxOre));
@@ -1427,6 +1431,29 @@ function renderComparison(
     formatFalseActivations(alternative),
     comparison.falseActivations,
   );
+  if (current.directionMetrics || alternative.directionMetrics) {
+    appendMetricRow(
+      table,
+      'Angular error',
+      formatDirectionMetric(current, 'meanAngularErrorDeg', ' deg'),
+      formatDirectionMetric(alternative, 'meanAngularErrorDeg', ' deg'),
+      comparison.angularError,
+    );
+    appendMetricRow(
+      table,
+      'Direction jitter',
+      formatDirectionMetric(current, 'meanJitterDeg', ' deg'),
+      formatDirectionMetric(alternative, 'meanJitterDeg', ' deg'),
+      comparison.jitter,
+    );
+    appendMetricRow(
+      table,
+      'Direction dropouts',
+      formatDirectionMetric(current, 'dropoutCount'),
+      formatDirectionMetric(alternative, 'dropoutCount'),
+      comparison.dropouts,
+    );
+  }
   container.append(table);
 }
 
@@ -1470,6 +1497,16 @@ function formatLatency(score: ChannelScore): string {
 
 function formatFalseActivations(score: ChannelScore): string {
   return `${score.falseActivationCount} (${score.falseActivationsPerMinute.toFixed(1)}/min)`;
+}
+
+function formatDirectionMetric(
+  score: ChannelScore,
+  metric: 'meanAngularErrorDeg' | 'meanJitterDeg' | 'dropoutCount',
+  suffix: string = '',
+): string {
+  const value = score.directionMetrics?.[metric];
+  if (value === undefined) return 'No result';
+  return `${metric === 'dropoutCount' ? value : value.toFixed(1)}${suffix}`;
 }
 
 function recommendationLabel(verdict: string): string {

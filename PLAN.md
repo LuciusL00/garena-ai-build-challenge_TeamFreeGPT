@@ -19,6 +19,9 @@
 | A separate before/after rerun and gameplay-latency HUD are required | Calibration provides the measured comparison; gameplay shows detected input, confidence and mapped action | The team chose visible evidence without forcing an unnecessary second calibration run |
 | Accepting an alternative requires calibration | The player may test and review results or explicitly use an alternative without testing | The layer advises but does not block the player's control choice |
 | T1 pointing and additional mappings are optional future polish | Point direction, direction-ended handling, direction calibration and three visual trigger mappings are integrated | These became available early enough to include without changing the middleware boundary |
+| Recommendation uses simple raw metric differences | Quick estimates require a two-prompt success difference, one accidental activation cannot decide a winner, and direction quality is included | The initial rules were too sensitive for small samples and ignored evidence already measured by direction calibration |
+| Portability is defended only by an integration snippet | A minimal `/portability` host binds a real touch/fist action without importing Swarmfall | A second tiny host demonstrates the dependency boundary without spending time on another game |
+| MediaPipe runtime and model load from third-party URLs | The pinned runtime and model are self-hosted under `/mediapipe/` | This removes a live-demo dependency on third-party asset availability |
 | Natural-language strategy generation may follow T0 | LLM strategy generation remains deferred | It does not strengthen the adaptive-control MVP and risks looking like macro automation |
 | Temporary review tunnel is the delivery route | A public Sites deployment is available at [swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site) | The demo needs a stable HTTPS origin for mobile camera access |
 

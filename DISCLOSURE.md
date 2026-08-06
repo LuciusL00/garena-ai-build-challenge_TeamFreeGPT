@@ -28,16 +28,17 @@ Phaser is not installed or used. Swarmfall renders with the browser Canvas 2D AP
 No custom model was trained, and the published model weights were not modified. Point direction
 is calculated locally from MediaPipe hand landmarks; it does not use a second model.
 
-At runtime the vision channel downloads:
+The deployment self-hosts the pinned files under `public/mediapipe/`:
 
-- Pinned MediaPipe WebAssembly runtime:
-  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm`
-- Published Gesture Recognizer model:
-  `https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task`
+- WebAssembly runtime copied without modification from the installed
+  `@mediapipe/tasks-vision@0.10.35` package.
+- Published Gesture Recognizer model originally downloaded from
+  `https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task`.
+- Model SHA-256:
+  `97952348CF6A6A4915C2EA1496B4B37EBABC50CBBF80571435643C455F2B0482`.
 
-Camera frames remain in the browser and are not uploaded to jsDelivr, Google or the deployment
-host. Network access is required for the initial runtime/model download unless those files are
-self-hosted in a future release.
+The browser downloads these static files from the same application origin. Camera frames remain
+inside the browser and are not uploaded to Google, a CDN or the deployment host.
 
 ## APIs and hosted services
 

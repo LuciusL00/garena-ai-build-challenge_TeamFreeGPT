@@ -11,12 +11,15 @@ import {
   GestureCommandGate,
   InputChannelId,
   InputSourceId,
+  PointDirectionTracker,
   VisionInputChannel,
+  compareChannelScores,
   highestConfidenceGestureCommand,
   scoreCalibration,
 } from '../index.ts';
 import type {
   CalibrationSession,
+  ChannelScore,
   ChannelContext,
   InputChannel,
   ProfileStorage,
@@ -314,7 +317,6 @@ async function main(): Promise<void> {
     'profile scores survive save and load',
     restoredProfile.get('TRIGGER', InputSourceId.HAND_CLOSED_FIST)?.successRate === 1,
   );
-
   console.log('\nRule-based recommendation');
   const recommender = new ControlRecommender();
   const request = {
@@ -375,15 +377,152 @@ async function main(): Promise<void> {
     'two low-success controls request a retest',
     recommender.recommend(request, lowSuccessProfile).verdict === 'retest',
   );
+  const latencySensitiveResult = recommender.recommend(
+    {
+      ...request,
+      requirements: { task: 'TRIGGER', spatial: false, latencyCritical: true },
+    },
+    clearlyBetterProfile,
+  );
   check(
-    'latency-critical metadata does not automatically reject a measured winner',
+    'latency-critical action keeps a measured winner and explains relevant latency',
+    latencySensitiveResult.verdict === 'swap' &&
+      latencySensitiveResult.explanation.includes('latency-sensitive'),
+  );
+
+  const quickCurrent: ChannelScore = {
+    ...touchScore,
+    trialCount: 6,
+    successCount: 5,
+    successRate: 5 / 6,
+    medianLatencyMs: 500,
+    falseActivationCount: 0,
+    falseActivationObservationMs: 15_000,
+    falseActivationsPerMinute: 0,
+  };
+  const quickAlternative: ChannelScore = {
+    ...fistScore,
+    trialCount: 6,
+    successCount: 6,
+    successRate: 1,
+    medianLatencyMs: 500,
+    falseActivationCount: 0,
+    falseActivationObservationMs: 15_000,
+    falseActivationsPerMinute: 0,
+  };
+  check(
+    'one quick-test miss does not invent a winner',
+    compareChannelScores(quickCurrent, quickAlternative).success === 'similar' &&
+      recommender.recommend(
+        request,
+        new CalibrationProfile([quickCurrent, quickAlternative]),
+      ).verdict === 'keep',
+  );
+  const twoMissCurrent = {
+    ...quickCurrent,
+    successCount: 4,
+    successRate: 4 / 6,
+  };
+  check(
+    'two quick-test misses are a meaningful success difference',
+    compareChannelScores(twoMissCurrent, quickAlternative).success === 'alternative-better',
+  );
+  const oneFalseActivation = {
+    ...quickAlternative,
+    falseActivationCount: 1,
+    falseActivationsPerMinute: 4,
+  };
+  check(
+    'one accidental activation remains visible without deciding the winner',
+    compareChannelScores(quickCurrent, oneFalseActivation).falseActivations === 'similar',
+  );
+  const repeatedFalseActivations = {
+    ...quickAlternative,
+    falseActivationCount: 2,
+    falseActivationsPerMinute: 8,
+  };
+  check(
+    'repeated accidental activations affect the comparison',
+    compareChannelScores(quickCurrent, repeatedFalseActivations).falseActivations === 'current-better',
+  );
+  check(
+    'short WAIT observation does not claim a false-activation advantage',
+    compareChannelScores(
+      { ...quickCurrent, falseActivationObservationMs: 5_000 },
+      { ...repeatedFalseActivations, falseActivationObservationMs: 5_000 },
+    ).falseActivations === 'unavailable',
+  );
+
+  const touchDirectionScore: ChannelScore = {
+    task: 'DIRECTION',
+    channel: InputChannelId.TOUCH,
+    source: InputSourceId.TOUCH_DIRECTION,
+    trialCount: 8,
+    successCount: 8,
+    successRate: 1,
+    medianLatencyMs: 450,
+    falseActivationCount: 0,
+    falseActivationObservationMs: 0,
+    falseActivationsPerMinute: 0,
+    directionMetrics: {
+      meanAngularErrorDeg: 18,
+      meanJitterDeg: 10,
+      dropoutCount: 3,
+    },
+    recordedAt: 60_000,
+  };
+  const handDirectionScore: ChannelScore = {
+    ...touchDirectionScore,
+    channel: InputChannelId.HAND_VISION,
+    source: InputSourceId.HAND_POINT_DIRECTION,
+    directionMetrics: {
+      meanAngularErrorDeg: 8,
+      meanJitterDeg: 4,
+      dropoutCount: 0,
+    },
+  };
+  const directionRequest = {
+    action: 'DIRECT_UNITS' as const,
+    requirements: { task: 'DIRECTION' as const, spatial: false, latencyCritical: true },
+    currentSource: InputSourceId.TOUCH_DIRECTION,
+    alternativeSource: InputSourceId.HAND_POINT_DIRECTION,
+  };
+  check(
+    'direction quality can recommend a more precise stable alternative',
+    recommender.recommend(
+      directionRequest,
+      new CalibrationProfile([touchDirectionScore, handDirectionScore]),
+    ).verdict === 'swap',
+  );
+  check(
+    'mixed direction quality remains a player-visible trade-off',
+    recommender.recommend(
+      directionRequest,
+      new CalibrationProfile([
+        touchDirectionScore,
+        {
+          ...handDirectionScore,
+          directionMetrics: {
+            meanAngularErrorDeg: 8,
+            meanJitterDeg: 20,
+            dropoutCount: 0,
+          },
+        },
+      ]),
+    ).verdict === 'trade-off',
+  );
+  check(
+    'spatial actions request missing precision evidence instead of guessing',
     recommender.recommend(
       {
-        ...request,
-        requirements: { task: 'TRIGGER', spatial: false, latencyCritical: true },
+        ...directionRequest,
+        requirements: { task: 'DIRECTION', spatial: true, latencyCritical: false },
       },
-      clearlyBetterProfile,
-    ).verdict === 'swap',
+      new CalibrationProfile([
+        { ...touchDirectionScore, directionMetrics: undefined },
+        { ...handDirectionScore, directionMetrics: undefined },
+      ]),
+    ).verdict === 'retest',
   );
 
   console.log('\nBinding settings controller');
@@ -537,6 +676,39 @@ async function main(): Promise<void> {
     focusedVision.focusTriggerSource(InputSourceId.HAND_POINT_DIRECTION);
   });
 
+  console.log('\nPoint direction stability');
+  const pointTracker = new PointDirectionTracker();
+  const initialDirection = pointTracker.update(pointLandmarks(0, 180, 90), 0);
+  const smallChange = pointTracker.update(pointLandmarks(2, 180, 90), 67);
+  check(
+    'four-degree dead zone suppresses small direction wobble',
+    initialDirection !== null &&
+      smallChange?.x === initialDirection.x &&
+      smallChange.y === initialDirection.y,
+  );
+  const transientLoss = pointTracker.update([], 134);
+  check(
+    'brief landmark loss holds the previous direction',
+    transientLoss?.x === smallChange?.x && transientLoss?.y === smallChange?.y,
+  );
+  const tolerantRecovery = pointTracker.update(pointLandmarks(10, 150, 140), 200);
+  check('an active point uses the looser hold angles', tolerantRecovery !== null);
+  check('direction remains active after recovery within grace', pointTracker.isActive);
+  check(
+    'loss grace remains active through its 180 ms boundary',
+    pointTracker.update([], 380) !== null,
+  );
+  check(
+    'continued landmark loss ends direction after the grace period',
+    pointTracker.update([], 381) === null && !pointTracker.isActive,
+  );
+
+  const strictEntryTracker = new PointDirectionTracker();
+  check(
+    'looser hold angles cannot start a new pointing session',
+    strictEntryTracker.update(pointLandmarks(10, 150, 140), 0) === null,
+  );
+
   if (failures.length > 0) {
     throw new Error(`${failures.length} adaptive-input check(s) failed: ${failures.join(', ')}`);
   }
@@ -544,3 +716,43 @@ async function main(): Promise<void> {
 }
 
 await main();
+
+function pointLandmarks(
+  directionDeg: number,
+  indexAngleDeg: number,
+  foldedAngleDeg: number,
+): readonly { x: number; y: number; z: number }[] {
+  const landmarks = Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0 }));
+  setFinger(landmarks, 5, 6, 8, 0.2, directionDeg, indexAngleDeg);
+  setFinger(landmarks, 9, 10, 12, 0.4, directionDeg, foldedAngleDeg);
+  setFinger(landmarks, 13, 14, 16, 0.6, directionDeg, foldedAngleDeg);
+  setFinger(landmarks, 17, 18, 20, 0.8, directionDeg, foldedAngleDeg);
+  return landmarks;
+}
+
+function setFinger(
+  landmarks: { x: number; y: number; z: number }[],
+  mcpIndex: number,
+  pipIndex: number,
+  tipIndex: number,
+  baseY: number,
+  directionDeg: number,
+  jointAngleDeg: number,
+): void {
+  const directionRad = directionDeg * Math.PI / 180;
+  const nextSegmentRad = directionRad + Math.PI - jointAngleDeg * Math.PI / 180;
+  const segmentLength = 0.1;
+  const mcp = { x: 0.3, y: baseY, z: 0 };
+  const pip = {
+    x: mcp.x + Math.cos(directionRad) * segmentLength,
+    y: mcp.y + Math.sin(directionRad) * segmentLength,
+    z: 0,
+  };
+  landmarks[mcpIndex] = mcp;
+  landmarks[pipIndex] = pip;
+  landmarks[tipIndex] = {
+    x: pip.x + Math.cos(nextSegmentRad) * segmentLength,
+    y: pip.y + Math.sin(nextSegmentRad) * segmentLength,
+    z: 0,
+  };
+}

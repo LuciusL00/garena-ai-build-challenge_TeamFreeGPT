@@ -162,7 +162,11 @@ export default function CalibrationClient() {
   const currentScore = findScore(scores, selection.currentSource, selection.task);
   const alternativeScore = findScore(scores, selection.alternativeSource, selection.task);
   const comparison = currentScore && alternativeScore
-    ? compareChannelScores(currentScore, alternativeScore)
+    ? compareChannelScores(currentScore, alternativeScore, {
+        task: selection.task,
+        spatial: false,
+        latencyCritical: selection.task === 'DIRECTION',
+      })
     : null;
   const recommendation = useMemo(() => {
     const profile = new CalibrationProfile(scores);
@@ -799,6 +803,43 @@ function ComparisonTable({
               status={sideStatus(comparison?.falseActivations, 'alternative')}
             />
           </tr>
+          {(current?.task === 'DIRECTION' || alternative?.task === 'DIRECTION') && (
+            <>
+              <tr>
+                <th>Direction error <small>angular error; lower is better</small></th>
+                <MetricCell
+                  value={formatDirectionMetric(current, 'meanAngularErrorDeg')}
+                  status={sideStatus(comparison?.angularError, 'current')}
+                />
+                <MetricCell
+                  value={formatDirectionMetric(alternative, 'meanAngularErrorDeg')}
+                  status={sideStatus(comparison?.angularError, 'alternative')}
+                />
+              </tr>
+              <tr>
+                <th>Direction wobble <small>jitter; lower is better</small></th>
+                <MetricCell
+                  value={formatDirectionMetric(current, 'meanJitterDeg')}
+                  status={sideStatus(comparison?.jitter, 'current')}
+                />
+                <MetricCell
+                  value={formatDirectionMetric(alternative, 'meanJitterDeg')}
+                  status={sideStatus(comparison?.jitter, 'alternative')}
+                />
+              </tr>
+              <tr>
+                <th>Direction dropouts <small>lower is better</small></th>
+                <MetricCell
+                  value={formatDirectionMetric(current, 'dropoutCount')}
+                  status={sideStatus(comparison?.dropouts, 'current')}
+                />
+                <MetricCell
+                  value={formatDirectionMetric(alternative, 'dropoutCount')}
+                  status={sideStatus(comparison?.dropouts, 'alternative')}
+                />
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
     </div>
@@ -863,6 +904,15 @@ function formatFalseActivations(score?: ChannelScore): string {
 function formatFalseActivationRate(score?: ChannelScore): string | undefined {
   if (!score) return undefined;
   return `${score.falseActivationsPerMinute.toFixed(1)}/min estimate`;
+}
+
+function formatDirectionMetric(
+  score: ChannelScore | undefined,
+  metric: 'meanAngularErrorDeg' | 'meanJitterDeg' | 'dropoutCount',
+): string {
+  const value = score?.directionMetrics?.[metric];
+  if (value === undefined) return '—';
+  return metric === 'dropoutCount' ? String(value) : `${value.toFixed(1)}°`;
 }
 
 function formatDuration(durationMs: number): string {
