@@ -11,6 +11,7 @@ button, a { font: inherit; }
 
 .portability-shell { width: min(940px, 100%); min-height: 100svh; margin: 0 auto; padding: 20px; }
 .portability-shell header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.portability-shell header nav { display: flex; flex-wrap: wrap; gap: 14px; }
 .portability-shell h1, .portability-shell h2 { margin: 4px 0 0; }
 .portability-shell h1 { color: #b8f15d; font: 700 clamp(34px, 7vw, 62px)/1 "Consolas", monospace; }
 .portability-shell a { color: #61d7d7; }

@@ -52,6 +52,13 @@ accessibility or adoption claims.
 
 - [Play Swarmfall](https://luciusl00.github.io/)
 - [Open the independent portability host](https://luciusl00.github.io/portability)
+- [Try the open-source 2048 portability host](https://luciusl00.github.io/portability-2048)
+
+The small Pulse host proves that a typed action can be registered without importing Swarmfall.
+The 2048 host goes one step further: it keeps a pinned MIT-licensed game's grid, movement and
+rendering logic unchanged, then connects touch and hand direction through one semantic
+`MOVE_TILES` adapter. The project does not claim authorship of 2048; its source and licence are
+preserved under `public/2048/`.
 
 Swarmfall is the reference host, not the product. Its six remappable actions are:
 
@@ -111,12 +118,14 @@ packages/
                         calibration, profiles, tuning and recommendation
 
 demos/
-└── swarmfall/          reference game and host-owned adapter/UI
+├── swarmfall/          reference game and host-owned adapter/UI
+└── 2048-portability/   semantic adapter for the pinned open-source game logic
 
 app/
 ├── page.tsx            Swarmfall route
 ├── calibration/        prompted measurement and vision tuning
-└── portability/        independent one-action host proving the package boundary
+├── portability/        independent one-action host proving the package boundary
+└── portability-2048/   open-source-game portability smoke test
 ```
 
 `packages/adaptive-input/` never imports from `demos/`. Input channels emit neutral signals; a
@@ -184,7 +193,7 @@ Shipped:
 - In-game gesture mirror with hand landmarks and mapped-action feedback
 - Camera failure fallback to touch
 - Responsive mobile portrait and landscape gameplay
-- Independent portability host with no Swarmfall imports
+- Independent Pulse and open-source 2048 portability hosts with no Swarmfall imports
 
 Deferred:
 

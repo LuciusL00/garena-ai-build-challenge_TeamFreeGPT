@@ -119,7 +119,10 @@ export default function PortabilityClient() {
           <span className="portability-eyebrow">Portability proof</span>
           <h1>Pulse Host</h1>
         </div>
-        <a href="/">Back to Swarmfall</a>
+        <nav aria-label="Portability routes">
+          <a href="/portability-2048">2048 smoke test</a>
+          <a href="/">Back to Swarmfall</a>
+        </nav>
       </header>
 
       <section className="portability-intro">

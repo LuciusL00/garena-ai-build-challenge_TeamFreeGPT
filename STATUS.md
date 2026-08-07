@@ -50,13 +50,14 @@ player-facing controls.
 | Gesture mirror | Complete | Gameplay shows the live camera image, hand connections, detected input and mapped action. |
 | Mobile layout | Complete | Portrait, laptop and landscape layouts preserve game proportions and keep controls/restart reachable. |
 | Frame-independent mining | Complete | Mining progression uses elapsed time rather than rendered-frame count. |
-| Portability proof | Complete | `/portability` registers a typed action through the package without importing Swarmfall. |
-| HTTPS deployment | Complete | The public GitHub Pages origin serves the game, calibration route, assets and portability host. |
+| Portability proof | Complete | `/portability` proves the package boundary; `/portability-2048` connects pinned open-source 2048 logic through one semantic action without importing Swarmfall. |
+| HTTPS deployment | Complete | The public GitHub Pages origin serves the game, calibration route, assets and both portability hosts. |
 
 ## Live routes
 
 - Swarmfall: <https://luciusl00.github.io/>
 - Portability host: <https://luciusl00.github.io/portability>
+- Open-source 2048 host: <https://luciusl00.github.io/portability-2048>
 
 ## Architecture boundary
 
@@ -104,6 +105,8 @@ These are development-team observations, not a controlled benchmark or formal us
 | Default camera rate on the manually tested phone | Visible lag observed |
 | Automatic camera-rate selection on that phone | No visible lag observed afterward |
 | Steep camera angle | Recognition degraded at roughly 30° tilt in manual testing |
+| 2048 touch direction through `MOVE_TILES` | Passed in a production browser build; accepted telemetry incremented and the board changed |
+| 2048 camera denial fallback | Passed in a production browser build; binding returned to touch and the game remained playable |
 
 The phone model, OS and browser were not recorded. A formal phone/laptop performance benchmark was
 explicitly deferred because of the submission deadline. The FPS observation above must not be
@@ -118,8 +121,8 @@ generalized to other devices.
 - Quick and Full trigger tests share one profile slot. Saving Quick replaces Full after an explicit
   warning.
 - The package requires a small semantic-action adapter in each integrating game.
-- The minimal second host proves the dependency boundary; integration into an unrelated full
-  open-source game is optional work after submission materials.
+- The 2048 smoke test intentionally covers one semantic directional action. It demonstrates an
+  unrelated open-source integration, not the full calibration and recommendation experience.
 
 ## Scope boundary
 

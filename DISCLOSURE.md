@@ -41,6 +41,16 @@ The deployment self-hosts the pinned files under `public/mediapipe/`:
 The browser downloads these static files from the same application origin. Camera frames remain
 inside the browser and are not uploaded to Google, a CDN or the deployment host.
 
+## Third-party game source
+
+| Component | Author | Pinned revision | Licence | Use |
+|---|---|---|---|---|
+| 2048 | Gabriele Cirulli | `478b6ec346e3787f589e4af751378d06ded4cbbc` | MIT | Unchanged grid, tile, game-manager and HTML-actuator logic in the portability smoke test |
+
+The imported files and upstream MIT licence are preserved under `public/2048/`. The upstream input
+manager, application bootstrap, fonts and polyfills are not shipped; the project-owned host routes
+all touch and hand-direction attempts through the Adaptive Input semantic adapter.
+
 ## APIs and hosted services
 
 No LLM API or other inference API is used by the current build. Natural-language mapping and
@@ -60,7 +70,8 @@ server.
 ## Assets
 
 No third-party sprites, audio files or web fonts are used. Swarmfall uses programmatically drawn
-Canvas 2D shapes, CSS styling and system fonts.
+Canvas 2D shapes, CSS styling and system fonts. The 2048 host also uses project-owned CSS and
+system fonts; no upstream image, audio or font assets are imported.
 
 ## AI-assisted development
 
