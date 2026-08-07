@@ -152,6 +152,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
   .bottom-bar { flex-direction: column; }
 }
 
+@media (orientation: landscape) and (max-height: 600px) and (any-pointer: coarse) {
+  .game-area { align-items: start; }
+  .arena-frame { height: min(530px, calc(100svh - 16px)); min-height: 0; }
+  #arena { min-height: 0; }
+}
+
 @media (max-width: 480px) {
   .status-cell { padding: 10px 7px; }
   .status-cell .label { display: block; font-size: 9px; letter-spacing: .06em; overflow-wrap: anywhere; }
