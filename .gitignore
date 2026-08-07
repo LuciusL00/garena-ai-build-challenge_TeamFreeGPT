@@ -12,8 +12,11 @@ next-env.d.ts
 !.env.example
 *.key
 
-# organiser documents, not part of our submission
-docs/
+# organiser documents are not part of the source submission; allow only our historical archive
+docs/*
+!docs/archive/
+docs/archive/*
+!docs/archive/*.md
 
 # editor / OS
 .DS_Store

@@ -1,6 +1,12 @@
-# Working With Coding Agents
+# Working With Coding Agents — Historical Teammate Guide
 
-**For the team.** [AGENTS.md](AGENTS.md) is instructions *to* the agent — it reads that file
+> **Historical process document.** This guide was written at the start of the competition for
+> human teammates who were less familiar with coding agents. It preserves that onboarding context
+> but is not current project policy. Active coding-agent instructions live in
+> [AGENTS.md](../../AGENTS.md); current product guidance lives in
+> [ARCHITECTURE.md](../../ARCHITECTURE.md) and [STATUS.md](../../STATUS.md).
+
+**For the team.** [AGENTS.md](../../AGENTS.md) is instructions *to* the agent — it reads that file
 automatically. This file is for the people driving it.
 
 Nobody needs to read this end to end. The first two sections are the ones that matter.
@@ -91,7 +97,7 @@ VERIFY:      Run `npm run build` and paste the output. Show me the sample
              object produced by one real press, or say you could not test it.
 ```
 
-The template also lives in [AGENTS.md](AGENTS.md), so nobody has to memorise it.
+The template also lives in [AGENTS.md](../../AGENTS.md), so nobody has to memorise it.
 
 ---
 
@@ -125,10 +131,10 @@ Agents answer that honestly far more often than they volunteer the same informat
 | Symptom | What to do |
 |---|---|
 | Claims something is done, you doubt it | Don't argue. **"Show me the exact lines you changed."** Fabrication collapses under a request for specifics |
-| Forgot an instruction you gave earlier | It is probably in [AGENTS.md](AGENTS.md) — point at the section by name. If the session is long, start a fresh one |
+| Forgot an instruction you gave earlier | It is probably in [AGENTS.md](../../AGENTS.md) — point at the section by name. If the session is long, start a fresh one |
 | Wandered outside the task | Revert, then re-prompt with a `CONSTRAINTS` line naming what not to touch |
 | Same fix attempted three times, still broken | **Stop.** It does not understand the problem. Read the code yourself, or ask it to explain what it thinks is happening |
-| Added a dependency you didn't ask for | Revert. [AGENTS.md](AGENTS.md) forbids this — point at it |
+| Added a dependency you didn't ask for | Revert. [AGENTS.md](../../AGENTS.md) forbids this — point at it |
 | Silent about something that failed | Ask directly: *"What failed? Paste the exact error."* |
 | Long session producing worse answers | Start a new session. Quality degrades as context fills up |
 
@@ -147,10 +153,10 @@ than re-explaining from scratch:
 
 | Document | Useful for |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Read automatically every session — the rules that must not be broken |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | How the pieces fit; interfaces |
-| [PLAN.md](PLAN.md) | The specification, including exact rules and thresholds |
-| [STATUS.md](STATUS.md) | Who owns which directory |
+| [AGENTS.md](../../AGENTS.md) | Read automatically every session — the rules that must not be broken |
+| [ARCHITECTURE.md](../../ARCHITECTURE.md) | How the pieces fit; interfaces |
+| [PLAN.md](PLAN.md) | Original competition plan and thresholds; historical only |
+| [STATUS.md](../../STATUS.md) | Current shipped state and evidence boundaries |
 
 ---
 

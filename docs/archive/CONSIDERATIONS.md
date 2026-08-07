@@ -1,4 +1,36 @@
-# Considerations
+# Considerations — Historical Assumption Register
+
+> **Historical document — not an active question list.** This file was created at the start of
+> the competition to expose assumptions before implementation. The original questions remain
+> below for decision-history context. Current behavior is documented in
+> [STATUS.md](../../STATUS.md) and [ARCHITECTURE.md](../../ARCHITECTURE.md).
+
+## Final dispositions — 8 August 2026
+
+No item below is waiting for a product decision. `A4` records an intentionally deferred formal
+benchmark; it is a limitation of the evidence, not an unresolved architecture choice.
+
+| ID | Disposition | Final position |
+|---|---|---|
+| A1 | Resolved | Swarmfall's complete source is integrated and extensible in this repository. |
+| A2 | Superseded | Prompted calibration and middleware telemetry no longer depend on Swarmfall buttons exposing raw pointer data. |
+| A3 | Resolved | Calibration, controls and gameplay are connected through routed screens and persisted state. |
+| A4 | Partially observed; formal benchmark deferred | Default camera processing caused visible lag on the manually tested phone; no visible lag was observed after automatic rate selection. This is not a controlled or cross-device result. |
+| B1 | Resolved | MediaPipe provides real on-device ML perception; transparent comparison rules produce player-readable recommendations. |
+| B2 | Resolved with limitation | Thresholds began as engineering defaults and were refined through team and device testing. There was no formal user study. |
+| B3 | Resolved | Squad switching is a discrete, non-latency-critical trigger. Continuous unit direction is separately latency-critical. |
+| B4 | Superseded | Closed fist, open palm and thumbs up are independently tunable trigger sources; pointing supplies relative direction. |
+| B5 | Resolved MVP boundary | Either hand may gesture, but the recognizer tracks one hand at a time and does not create handedness-specific bindings. Simultaneous or hand-specific control is future work. |
+| B6 | Resolved | Prompted touch-versus-alternative measurement is the primary evidence; gameplay confirms the accepted binding without treating round score as causal proof. |
+| C1 | Resolved | The package dependency boundary and independent `/portability` host support the middleware framing. |
+| C2 | Superseded | No LLM is shipped. Natural-language mapping is outside the MVP. |
+| C3 | Superseded | No external AI model provider or API key is required; MediaPipe is the disclosed AI component. |
+| C4 | Resolved | The MVP supports three visual trigger poses plus hand-point direction. |
+| D1 | Historical | The original role allocation described the build phase and is no longer active. |
+| D2 | Resolved | Integration, review fixes and the merge to `main` were completed. |
+| D3 | Historical | The competition-start workflow has been replaced by current [AGENTS.md](../../AGENTS.md) instructions. |
+
+---
 
 **Assumptions and open questions that have not yet been confirmed by more than one person.**
 
@@ -268,7 +300,7 @@ between rounds, never in real time.
 the validation work the grammar depends on. We still validate server-side against the allowlist —
 the API constraint is a first line, not the only one.
 
-**Whichever is chosen must be recorded in [DISCLOSURE.md](DISCLOSURE.md).**
+**Whichever is chosen must be recorded in [DISCLOSURE.md](../../DISCLOSURE.md).**
 
 **Confirm by:** 5 Aug, before T1 starts.
 

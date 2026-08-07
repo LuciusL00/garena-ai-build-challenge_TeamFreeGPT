@@ -9,7 +9,10 @@ Read this before making any change. It applies to every coding agent working in 
 
 A game-agnostic middleware layer that supplies input channels (touch, on-device hand gesture) and
 assigns them to game actions per player — measuring, recommending, explaining, and validating.
-`demos/swarmfall/` is a demo host, not the product. See [PLAN.md](PLAN.md) for the specification.
+`demos/swarmfall/` is a demo host, not the product. Read [ARCHITECTURE.md](ARCHITECTURE.md) for the
+current system boundary, [STATUS.md](STATUS.md) for verified state and
+[packages/adaptive-input/INTEGRATION.md](packages/adaptive-input/INTEGRATION.md) for the host
+contract. Original planning documents under [docs/archive/](docs/archive/) are historical only.
 
 ---
 
@@ -64,7 +67,7 @@ discover than the task saved.
 - Create files that were not asked for
 - Add `any`, `@ts-ignore`, or weaken `strict` to make an error go away — fix the actual type
 - Delete, skip or bypass a failing test
-- Modify another role's directory (see [STATUS.md](STATUS.md) for ownership)
+- Modify unrelated areas or historical records unless the task explicitly requires it
 
 ---
 

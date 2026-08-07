@@ -1,11 +1,17 @@
 # Adaptive Input Layer — Initial Plan and Decision Record
 
+> **Historical document — not the current specification.** This file preserves the team's
+> original competition plan, assumptions, schedules and decision trail. It is useful for
+> understanding how the MVP evolved, but current behavior is documented in
+> [STATUS.md](../../STATUS.md), [ARCHITECTURE.md](../../ARCHITECTURE.md) and the implementation.
+> Statements below may be superseded and should not be used as active engineering instructions.
+
 **Garena AI Build Challenge 2026**
 
 > **Historical planning baseline.** Most of this document preserves the team's 30 July–3 August
 > plan so reviewers can see the assumptions, priorities and genuine changes made during
 > implementation. It is not a current coding instruction. For current truth, read
-> [STATUS.md](STATUS.md), [ARCHITECTURE.md](ARCHITECTURE.md) and the implementation. Do not add an
+> [STATUS.md](../../STATUS.md), [ARCHITECTURE.md](../../ARCHITECTURE.md) and the implementation. Do not add an
 > old PLAN feature unless it also appears as current or pending work in STATUS.
 
 ## Current implementation delta — 6 August
@@ -58,7 +64,7 @@ T0 and is deferred until the mapping pipeline works end to end.
 
 The brief prescribes **no technology restrictions**. MediaPipe, any LLM, any framework are
 permitted. Disclosure of third-party libraries, models, datasets and APIs is **mandatory** —
-see [DISCLOSURE.md](DISCLOSURE.md).
+see [DISCLOSURE.md](../../DISCLOSURE.md).
 
 ---
 
@@ -198,7 +204,7 @@ constraint. Never claimed to simulate any disability.
 
 ## 4. Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the reviewer-facing version. Design notes here.
+See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the reviewer-facing version. Design notes here.
 
 ### 4.1 Data flow
 
@@ -434,7 +440,7 @@ judged on whether it *functions end-to-end in a live setting*.
 ## 9. Tracks
 
 Availability varies. The ship ladder exists so reduced capacity changes **which tier is
-reached**, not whether there is a submission. See [STATUS.md](STATUS.md) for the short version.
+reached**, not whether there is a submission. See [STATUS.md](../../STATUS.md) for the short version.
 
 ### The shape of the work
 
@@ -470,7 +476,7 @@ Quality. No single role absorbs all three deliverables.
 - `git pull` on `main` before starting each day.
 - Never two people in one file — the allocation above makes this automatic.
 - **Types with empty implementations merge first.** The only blocking dependency in the project.
-- Update [DISCLOSURE.md](DISCLOSURE.md) the moment a dependency is added.
+- Update [DISCLOSURE.md](../../DISCLOSURE.md) the moment a dependency is added.
 - Do not add scope because a tier finished early.
 
 ---

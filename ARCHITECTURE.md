@@ -1,13 +1,18 @@
 # Architecture
 
-> Current implementation as of 6 August 2026. Historical alternatives remain in PLAN.md and
-> CONSIDERATIONS.md; this document describes the shipped MVP boundary.
+> Current implementation as of 8 August 2026. Historical alternatives and early assumptions are
+> preserved under [docs/archive/](docs/archive/); this document describes the shipped MVP.
 
 ## 1. Responsibilities
 
 The adaptive-input layer supplies input channels and assigns compatible channels to host-owned
 game actions. It measures how this player performs with each source, explains the comparison and
 changes a binding only after the player approves it.
+
+Players are the primary users. Developers, designers and accessibility teams integrate the layer;
+studios and publishers are organizational stakeholders that may reuse it across titles. The
+architecture addresses a gap between title-specific accessibility controls, generic OS-level
+cursor/key alternatives and manual remapping without measurement.
 
 The system separates input sources from game meaning. Channels emit neutral `InputSignal`
 records. A host adapter supplies its own action and typed payload. `BindingMap` then determines
@@ -71,6 +76,10 @@ angular error, jitter and dropouts in addition to success and latency. A latency
 requires comparable response-time evidence. A spatial action requires comparable precision
 evidence. Missing required evidence produces a retest recommendation rather than a guess.
 
+Swarmfall registers six remappable semantic actions: Gather, Spread, Switch squad, Direct units,
+Miner Protect and Guard Escort. Begin and Restart remain fixed touch actions. The catalog is
+host-owned; no Swarmfall action name appears in the reusable package.
+
 Requirements guide the recommendation but never block an explicit untested override. Original
 touch controls are installed synchronously at registration and remain the safe default.
 
@@ -79,6 +88,9 @@ touch controls are installed synchronously at registration and remain the safe d
 An `InputSourceId` is one bindable signal, such as `TOUCH_BUTTON` or `HAND_CLOSED_FIST`. An
 `InputChannelId` owns lifecycle and resources. The current `HAND_VISION` channel supplies closed
 fist, open palm, thumbs up and hand-point direction while running one MediaPipe recognizer.
+
+The recognizer is configured for one detected hand. Either hand may supply a pose, but the MVP
+does not distinguish left from right and does not dispatch simultaneous two-hand commands.
 
 Host payloads remain separate from source metadata:
 
@@ -105,6 +117,15 @@ error, jitter and dropouts.
 Latency has one definition for every channel: cue onset to accepted activation. Vision therefore
 includes recognition and stability delay rather than hiding it.
 
+Vision tuning is stored separately from calibration scores:
+
+- a step-down test finds a reliable hold duration for each trigger pose;
+- pointing gaps recommend one player-facing stability duration;
+- a device test measures 10, 12 and 15 FPS, saves the fastest sustained rate and selects the
+  lowest rate when none is sustained.
+
+These values describe a device and context. They are not cross-device performance guarantees.
+
 ## 6. Recommendation
 
 The recommender is a transparent rule set, not a trained model. It declares a source better only
@@ -120,7 +141,9 @@ The rules are deliberately conservative:
 - Missing latency or spatial evidence required by the host returns a retest recommendation.
 
 Thresholds are explicit constants in `recommendation/types.ts`. They are prototype policy, not a
-medical conclusion. The UI shows the underlying counts and measurements beside every verdict.
+medical conclusion. They began as engineering defaults and were refined through development-team
+and device testing, not a formal user study. The UI shows the underlying counts and measurements
+beside every verdict.
 
 ## 7. AI, assets and privacy
 
@@ -130,7 +153,7 @@ those landmarks.
 
 The pinned WebAssembly runtime and published float16 Gesture Recognizer model are served from the
 application's own `/mediapipe/` assets. Raw frames never leave the browser. Only derived scores
-and host-owned bindings persist in browser local storage.
+vision tuning and host-owned bindings persist in browser local storage.
 
 Natural-language mapping is deferred. If added later, it may select an allowlisted mapping ID; it
 will not generate gameplay logic, payloads, macros or timed command sequences.
@@ -142,5 +165,19 @@ typed `ACTIVATE` action, keeps touch as its default, optionally binds a real clo
 accepted and rejected pre-gate attempts. It imports the public middleware API and no Swarmfall
 code.
 
+This demonstrates the dependency direction without claiming zero integration work. A new game
+must declare semantic actions, translate neutral signals and render an appropriate settings flow.
+That adapter is the trade-off for direct game actions instead of cursor or keyboard emulation.
+
 The host UI remains replaceable. A native Android, iOS or engine integration can render its own
 settings and calibration screens while using the same action, signal, score and binding contracts.
+
+## 9. Evidence boundary
+
+Testing to date was performed by the development team. On one manually tested phone, the default
+camera rate caused visible lag and no visible lag was observed after automatic rate selection.
+The phone details were not recorded and formal phone/laptop benchmarking was deferred for the
+submission deadline, so this observation is not generalized.
+
+The architecture supports player choice and more adaptable input; it does not infer disability,
+make a clinical effectiveness claim or prove adoption impact.

@@ -40,6 +40,8 @@ interface GameActions {
   SPREAD_UNITS: Record<string, never>;
   TOGGLE_SQUAD: Record<string, never>;
   DIRECT_UNITS: { direction: { x: number; y: number } | null };
+  TOGGLE_MINER_PROTECT: Record<string, never>;
+  TOGGLE_GUARD_ESCORT: Record<string, never>;
 }
 ```
 
@@ -85,6 +87,9 @@ The player may still explicitly skip testing and override the recommendation.
 Keep fixed actions outside the remappable catalog, or register them with `remappable: false`.
 Swarmfall keeps Begin and Restart on its original touch/click path.
 
+Its current catalog registers six remappable actions: Gather, Spread, Switch squad, Direct units,
+Miner Protect and Guard Escort. Those names remain host-owned examples, not middleware concepts.
+
 ## 2. Describe available input sources
 
 `BindingSettingsController` needs game-independent source metadata:
@@ -121,6 +126,9 @@ const sources: readonly InputSourceDefinition[] = [
   },
 ];
 ```
+
+Swarmfall also declares open palm and thumbs up as global `TRIGGER` sources. Compatible sources
+are capabilities offered to a host; the middleware does not assign them game meaning.
 
 A targeted source belongs to the control the player touched. A global source, such as a camera
 gesture, does not identify a button by itself. The settings controller therefore checks that one
@@ -174,6 +182,8 @@ adaptive.on('GATHER_UNITS', (payload) => gameBus.emit('GATHER_UNITS', payload));
 adaptive.on('SPREAD_UNITS', (payload) => gameBus.emit('SPREAD_UNITS', payload));
 adaptive.on('TOGGLE_SQUAD', (payload) => gameBus.emit('TOGGLE_SQUAD', payload));
 adaptive.on('DIRECT_UNITS', (payload) => gameBus.emit('DIRECT_UNITS', payload));
+adaptive.on('TOGGLE_MINER_PROTECT', (payload) => gameBus.emit('TOGGLE_MINER_PROTECT', payload));
+adaptive.on('TOGGLE_GUARD_ESCORT', (payload) => gameBus.emit('TOGGLE_GUARD_ESCORT', payload));
 ```
 
 Use explicit typed listeners. They are repetitive by a few lines, but TypeScript catches action
@@ -198,6 +208,11 @@ Calling `preview()` never changes the live binding. The host calls `confirm()` o
 player approves the measured alternative. If the player explicitly skips testing, the host may
 call `confirmWithoutCalibration()`. `reset()` restores the game's declared default source.
 
+Before assigning a global source, inspect the conflict returned by the settings controller. If
+that source already drives another action, present the conflict to the player and restore the
+occupied action to its declared touch default before confirming the new assignment. One camera
+gesture must not silently drive several actions.
+
 Swarmfall opens its web calibration route and returns to the selected binding review. That route
 change is a reference-host choice, not a middleware requirement. A mobile host can pause its game,
 open a native calibration screen and resume its own scene afterward.
@@ -209,6 +224,8 @@ The package provides:
 - `CalibrationHarness` and `scoreCalibration()` for trigger inputs
 - `DirectionCalibrationHarness` and `scoreDirectionCalibration()` for relative direction
 - `CalibrationProfile` and `CalibrationProfileStore` for derived measurements
+- `VisionTuningStore` for device-level inference rate, per-pose trigger hold times and pointing
+  stability
 - `ControlRecommender` for side-by-side comparison
 
 Profiles are keyed by neutral task and source, such as
@@ -226,6 +243,17 @@ difference before that metric declares an advantage. One accidental activation r
 but does not decide the overall result by itself. Direction recommendations also use angular
 error, jitter and dropout evidence.
 
+Vision tuning is separate from task scores:
+
+- Trigger response tuning steps down through candidate hold times and keeps a duration only after
+  repeated detection and neutral-release checks.
+- Pointing stability is recommended from observed landmark-loss gaps.
+- `VisionDeviceSettingsController.measure()` probes the supported 10, 12 and 15 FPS rates, applies
+  the fastest sustained rate and falls back to the lowest rate when none is sustained.
+
+Apply saved tuning when constructing the vision channel. Treat it as device/context preference,
+not as evidence that one input source outperformed another.
+
 ## 7. Manage camera lifecycle
 
 Register platform channels with `ChannelManager`. After a binding changes, reconcile against
@@ -239,8 +267,12 @@ The manager serializes lifecycle changes, avoids duplicate starts and stops unus
 Camera denial or model failure must report an unavailable/error state while leaving touch usable.
 Stopping vision must release the media stream and processing loop.
 
-The camera preview is useful during calibration and gesture training. It does not need to cover
-the game during normal play.
+The camera preview is useful during calibration and gesture training. Swarmfall also renders a
+small in-game mirror with MediaPipe hand connections so a demonstration can show the physical
+gesture and mapped game response. That mirror is a host UI choice, not a package requirement.
+
+The current recognizer processes one detected hand. Either hand can supply a pose, but handedness
+does not create separate sources and simultaneous two-hand dispatch is not supported.
 
 The reference web build self-hosts the pinned MediaPipe runtime and model at `/mediapipe/`, so
 camera startup does not depend on a third-party runtime CDN.
@@ -265,8 +297,10 @@ restore the declared touch default.
 - Continuous direction always has an explicit end.
 - Previewing a binding does not mutate it.
 - The player explicitly confirms or skips testing before a change.
+- Reassigning an occupied global source returns the previous action to its touch default.
 - Camera failure leaves touch playable.
 - Repeated channel start/stop is safe.
+- Saved vision timing and inference-rate values are validated before use.
 - `npm run build` passes with strict TypeScript.
 
 ## Deliberately deferred
@@ -275,5 +309,6 @@ restore the declared touch default.
 - Generated strategy or macro behaviour
 - Button placement, size or offset modification
 - Face, tilt, sound and custom-trained gesture channels
+- Hand-specific or simultaneous two-hand bindings
 - Cross-site account/profile synchronization
 - Automatic conclusions about disability, fatigue or medical condition

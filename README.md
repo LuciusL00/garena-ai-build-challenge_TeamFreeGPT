@@ -2,39 +2,82 @@
 
 **Garena AI Build Challenge 2026 — Reimagine Digital Entertainment Experiences**
 
-Mobile games usually let players move or resize controls, but the player still has to adapt to
-the available input. This project is game-agnostic middleware that lets an integrating game offer
-touch and on-device hand input through one typed boundary.
+> **Games should adapt to players—not force players to adapt to controls.**
+
+Mobile games are commonly built around fixed touch controls. When alternative inputs exist, they
+are often custom-built for one title, designed around cursor or keyboard primitives, or manually
+configured without helping the player determine what works best.
+
+| Existing approach | Strength | Gap |
+|---|---|---|
+| Game-native accessibility controls | Directly understand game actions | Rebuilt separately for every game |
+| OS/PC-facing alternative controllers | Work across multiple applications | Usually expose cursor, click or key primitives rather than game semantics |
+| Manual remapping | Gives players choice | Leaves the player to discover suitable mappings through trial and error |
+| Adaptive Input | Reusable, game-semantic middleware | Requires each game to provide a small action adapter |
+
+Alternative input is not enough. Players need help finding which available input best fits each
+action, device and context.
+
+## Who it is for
+
+- **Primary users:** mobile players whose preferred input varies with reach, grip, reaction speed,
+  fatigue, motor ability or playing context.
+- **Integrators:** game developers, designers and accessibility teams that connect their game
+  actions to the middleware.
+- **Organizational stakeholders:** studios and publishers that may reuse the same input
+  infrastructure across multiple titles.
+
+The rest of this documentation uses **game teams** as the umbrella term for the people integrating
+and maintaining the layer.
+
+## What it does
 
 For each player, the layer can:
 
 1. Measure compatible input sources with the same prompted task.
-2. Compare success, reaction latency, false activations and directional quality where relevant.
-3. Explain whether one input measured better or whether the result is a trade-off.
-4. Apply a new binding only after the player approves it.
-5. Keep the game's original touch control available as the safe default.
+2. Compare success, response time, false activations and directional quality where relevant.
+3. Recommend a per-action mapping and explain the measured evidence or trade-off.
+4. Leave the decision with the player: approve, reject, skip testing or restore touch.
+5. Validate the accepted binding through normal gameplay.
 
-MediaPipe gesture recognition runs in the browser. Raw camera frames are not uploaded or stored.
-The current MVP uses transparent comparison rules rather than an LLM.
+MediaPipe gesture recognition runs on-device in the browser. Raw camera frames are not uploaded or
+stored. The recommender uses transparent comparison rules rather than an unsupported trained model
+or LLM.
 
-## Live demo
+Expected benefits are less player trial and error, more reliable access to game actions, and less
+repeated input and computer-vision work for game teams. These are prototype goals, not clinical
+accessibility or adoption claims.
 
-[Play Swarmfall](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site)
+## Live experience
 
-[Open the minimal portability host](https://swarmfall-adaptive-demo.meiyi-li-2025.chatgpt.site/portability)
+- [Play Swarmfall](https://luciusl00.github.io/)
+- [Open the independent portability host](https://luciusl00.github.io/portability)
 
-Swarmfall is the reference host, not the product. Its remappable actions are Gather, Spread,
-Switch squad and Direct units. Touch provides every original action; closed fist, open palm,
-thumbs up and hand-point direction are compatible alternatives.
+Swarmfall is the reference host, not the product. Its six remappable actions are:
 
-The calibration page offers:
+- Gather units
+- Spread units
+- Switch squad
+- Direct units
+- Miner Protect
+- Guard Escort
 
-- **Quick Test — 6 prompts:** a preview for development and short demonstrations.
+Every action retains its original touch path. Closed fist, open palm and thumbs up provide
+one-shot alternatives; hand pointing provides relative direction. Begin and Restart remain fixed
+touch actions.
+
+The calibration experience includes:
+
+- **Quick Test — 6 prompts:** a short preview for development and demonstrations.
 - **Full Test — 12 prompts:** the intended trigger-input comparison.
 - **Direction Test — 8 prompts:** compares touch direction with hand pointing.
+- **Response tuning:** finds a reliable hold time independently for each trigger pose.
+- **Pointing stability:** recommends dropout tolerance from observed pointing gaps.
+- **Camera-rate test:** measures 10, 12 and 15 FPS and saves the fastest sustained rate, falling
+  back to the lowest rate if none is sustained.
 
-Quick and Full trigger tests currently save to the same task-and-source profile slot. Running a
-Quick Test after a Full Test replaces that saved result; the UI states this explicitly.
+Quick and Full tests intentionally share one profile slot in this prototype. Saving a Quick Test
+therefore replaces a previous Full Test result; the UI warns the player before use.
 
 ## Run locally
 
@@ -50,10 +93,10 @@ npm run dev
 ```
 
 Open `http://localhost:3000/`. Browsers treat localhost as a secure context, so camera access can
-work there. A phone cannot normally use the laptop's plain-HTTP LAN address for camera testing;
-use the public HTTPS demo instead.
+work there. A phone cannot normally use a laptop's plain-HTTP LAN address for camera testing; use
+an HTTPS deployment instead.
 
-Verify a production build:
+Verify and run a production build:
 
 ```powershell
 npm run build
@@ -64,27 +107,32 @@ npm run start
 
 ```text
 packages/
-└── adaptive-input/     reusable middleware: actions, bindings, channels,
-                        telemetry, calibration, profiles and recommendation
+└── adaptive-input/     reusable actions, bindings, channels, telemetry,
+                        calibration, profiles, tuning and recommendation
 
 demos/
-└── swarmfall/          reference host game and host-owned adapter/UI
+└── swarmfall/          reference game and host-owned adapter/UI
 
 app/
-├── page.tsx            Swarmfall web route
-├── calibration/        web calibration screen used by the reference host
+├── page.tsx            Swarmfall route
+├── calibration/        prompted measurement and vision tuning
 └── portability/        independent one-action host proving the package boundary
 ```
 
-`packages/adaptive-input/` never imports from `demos/`. A host imports the layer and translates
-neutral input signals into its own typed game actions.
+`packages/adaptive-input/` never imports from `demos/`. Input channels emit neutral signals; a
+host adapter supplies game meaning and typed payloads. `BindingMap` gates dispatch while telemetry
+records both accepted and rejected attempts before that gate.
 
 ## Integration at a glance
 
 ```ts
 interface GameActions {
   GATHER_UNITS: Record<string, never>;
+  SPREAD_UNITS: Record<string, never>;
+  TOGGLE_SQUAD: Record<string, never>;
   DIRECT_UNITS: { direction: { x: number; y: number } | null };
+  TOGGLE_MINER_PROTECT: Record<string, never>;
+  TOGGLE_GUARD_ESCORT: Record<string, never>;
 }
 
 const adaptive = new AdaptiveInput<GameActions>();
@@ -108,56 +156,60 @@ adaptive.on('GATHER_UNITS', () => game.gatherSelectedUnits());
 adaptive.on('DIRECT_UNITS', ({ direction }) => game.directSelectedUnits(direction));
 ```
 
-Input channels emit neutral signals containing a source, timestamp, input shape and optional
-confidence. A host adapter chooses the matching game action and payload. `BindingMap` then decides
-whether that source may dispatch the action, while telemetry records both accepted and rejected
-attempts.
-
-See [packages/adaptive-input/INTEGRATION.md](packages/adaptive-input/INTEGRATION.md) for the complete
-host contract.
+See [the integration guide](packages/adaptive-input/INTEGRATION.md) for the complete host contract.
 
 ## Documentation
 
-Read these in this order:
-
 | Document | Purpose |
 |---|---|
-| [STATUS.md](STATUS.md) | Current implementation, ownership, known gaps and handoff state |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Current system boundaries and data flow |
-| [PLAN.md](PLAN.md) | Initial planning baseline plus a record of what changed |
-| [DISCLOSURE.md](DISCLOSURE.md) | Libraries, model assets and hosted services |
-| [CONSIDERATIONS.md](CONSIDERATIONS.md) | Assumptions and design questions; some entries are historical |
+| [STATUS.md](STATUS.md) | Current shipped state, verified evidence and remaining limitations |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current boundaries, data flow, AI role and portability design |
+| [packages/adaptive-input/INTEGRATION.md](packages/adaptive-input/INTEGRATION.md) | Host integration contract |
+| [DISCLOSURE.md](DISCLOSURE.md) | Third-party libraries, model assets and hosted services |
+| [AGENTS.md](AGENTS.md) | Active engineering rules and agent configuration |
+| [docs/archive/](docs/archive/) | Historical competition planning, assumptions and teammate guidance |
 
-When a historical PLAN statement conflicts with STATUS, ARCHITECTURE or the code, the current
-documents and code win.
+The archive preserves how the team reached the MVP. It is not current specification or process
+guidance.
 
 ## Current scope
 
 Shipped:
 
-- Touch trigger and directional sources
-- On-device closed fist, open palm, thumbs up and hand-point direction
-- Typed action registration and runtime binding gate
-- Pre-gate telemetry
-- Trigger and direction calibration
-- Saved player profile, conservative side-by-side comparison and explicit binding approval
-- A second minimal host with no Swarmfall imports
+- Typed semantic actions, original touch defaults and runtime binding gate
+- Touch trigger/direction and on-device closed fist, open palm, thumbs up and hand-point direction
+- Prompted trigger and direction measurement with conservative, explained recommendations
+- Explicit approval, override, conflict handling, default restoration and local persistence
+- Per-pose hold tuning, pointing stability and automatic camera-rate selection
+- In-game gesture mirror with hand landmarks and mapped-action feedback
 - Camera failure fallback to touch
+- Responsive mobile portrait and landscape gameplay
+- Independent portability host with no Swarmfall imports
 
 Deferred:
 
 - Face, tilt, sound and custom-trained gesture channels
 - Natural-language mapping and LLM integration
-- Generated strategies, macros and executable behaviour
+- Generated strategies, macros or executable behavior
+- Hand-specific or simultaneous two-hand bindings
 - Automatic button-layout modification
-- Cross-site account/profile synchronisation
+- Cross-site account/profile synchronization
 
-## Privacy and limitations
+## Privacy, evidence and limitations
 
-Camera processing stays on the player's device. The browser stores derived calibration scores and
-bindings in local storage. The pinned MediaPipe WebAssembly runtime and published gesture model
-are served by the application from the vendored files listed in [DISCLOSURE.md](DISCLOSURE.md).
+The pinned MediaPipe WebAssembly runtime and published Gesture Recognizer model are served from
+the application's own assets listed in [DISCLOSURE.md](DISCLOSURE.md). Camera processing stays on
+the player's device; browser storage contains only derived measurements, tuning and bindings.
 
-Saved measurements describe one device and testing context. Lighting, grip, camera angle or the
-player's condition may later change, so the player can retest instead of treating an old result as
-permanent truth.
+The recognizer accepts either hand but processes one detected hand at a time. A phone may be
+supported or held in one hand while the other gestures. The MVP does not distinguish left-hand
+from right-hand bindings.
+
+Testing so far was performed by the development team, not a formal user study. On one manually
+tested phone, the default camera processing rate caused visible lag and no visible lag was
+observed after automatic rate selection. That observation is device-specific and not a controlled
+performance benchmark.
+
+Saved measurements describe one player, device and testing context. Lighting, grip, camera angle
+or the player's condition may change, so the player can retest rather than treating an old result
+as permanent truth.
