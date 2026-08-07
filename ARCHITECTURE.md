@@ -24,10 +24,11 @@ packages/adaptive-input/     reusable layer
           | one-way dependency
           |
 demos/swarmfall/             full reference host
-app/portability/             minimal independent host
+demos/2048-portability/      third-party-game semantic adapter
+app/portability/             minimal developer smoke test
 ```
 
-The package never imports either host.
+The package never imports any host.
 
 ## 2. Data flow
 
@@ -160,10 +161,17 @@ will not generate gameplay logic, payloads, macros or timed command sequences.
 
 ## 8. Portability proof
 
-Swarmfall is the full reference host. `/portability` is a separate minimal host that declares one
-typed `ACTIVATE` action, keeps touch as its default, optionally binds a real closed fist and shows
-accepted and rejected pre-gate attempts. It imports the public middleware API and no Swarmfall
-code.
+Swarmfall is the full reference host. `/portability-2048` is the primary portability proof. It
+vendors the grid, tile, game-manager and HTML-actuator files from Gabriele Cirulli's 2048 at pinned
+commit `478b6ec346e3787f589e4af751378d06ded4cbbc` without changing those files. The upstream input
+manager and application bootstrap are intentionally excluded. A small host adapter maps touch and
+hand direction to the semantic `MOVE_TILES` action, then supplies the upstream game manager with
+its existing `move(direction)` event. Neither the host nor its adapter imports Swarmfall.
+
+`/portability` remains as a smaller developer smoke test. It declares one typed `ACTIVATE` action,
+keeps touch as its default, optionally binds a real closed fist and exposes accepted and rejected
+pre-gate attempts. It proves the minimum package boundary, while 2048 demonstrates adoption by
+structurally unrelated open-source game logic.
 
 This demonstrates the dependency direction without claiming zero integration work. A new game
 must declare semantic actions, translate neutral signals and render an appropriate settings flow.
@@ -174,10 +182,12 @@ settings and calibration screens while using the same action, signal, score and 
 
 ## 9. Evidence boundary
 
-Testing to date was performed by the development team. On one manually tested phone, the default
-camera rate caused visible lag and no visible lag was observed after automatic rate selection.
-The phone details were not recorded and formal phone/laptop benchmarking was deferred for the
-submission deadline, so this observation is not generalized.
+Testing to date was performed by the development team. A Redmi Note 11 Pro showed visible lag
+before automatic camera-rate selection; the test selected 10 FPS and the experience was smooth
+afterward. A Lenovo Legion 5 was smooth and the same test selected 15 FPS. These different results
+are limited evidence that the selector measures each device rather than always choosing the lowest
+rate. OS and browser versions were not recorded, and formal benchmarking was deferred for the
+submission deadline, so these observations are not generalized.
 
 The architecture supports player choice and more adaptable input; it does not infer disability,
 make a clinical effectiveness claim or prove adoption impact.

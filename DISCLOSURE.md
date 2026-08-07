@@ -53,12 +53,14 @@ all touch and hand-direction attempts through the Adaptive Input semantic adapte
 
 ## APIs and hosted services
 
-No LLM API or other inference API is used by the current build. Natural-language mapping and
-strategy generation are deferred.
+No LLM API or other remote inference API is used by the current build. The shipped product has no
+runtime prompts, autonomous agents or prompt configuration. `AGENTS.md` contains development
+workflow instructions for coding assistants; it is not part of the runtime product.
+Natural-language mapping and strategy generation are deferred.
 
-The public demonstration is hosted through GitHub Pages, with an earlier OpenAI Sites deployment
-retained as a historical mirror. Hosting serves the web application; neither host receives raw
-camera frames from MediaPipe processing.
+The public demonstration is hosted through GitHub Pages at `https://luciusl00.github.io/` from a
+separate public deployment repository. The submission source repository remains private. Hosting
+serves static application files; it does not receive raw camera frames from MediaPipe processing.
 
 ## Datasets and player data
 

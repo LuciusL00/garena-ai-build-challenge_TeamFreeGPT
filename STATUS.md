@@ -50,14 +50,14 @@ player-facing controls.
 | Gesture mirror | Complete | Gameplay shows the live camera image, hand connections, detected input and mapped action. |
 | Mobile layout | Complete | Portrait, laptop and landscape layouts preserve game proportions and keep controls/restart reachable. |
 | Frame-independent mining | Complete | Mining progression uses elapsed time rather than rendered-frame count. |
-| Portability proof | Complete | `/portability` proves the package boundary; `/portability-2048` connects pinned open-source 2048 logic through one semantic action without importing Swarmfall. |
+| Portability proof | Complete | `/portability-2048` connects unchanged pinned 2048 core logic through one semantic action without importing Swarmfall; `/portability` remains a minimal developer smoke test. |
 | HTTPS deployment | Complete | The public GitHub Pages origin serves the game, calibration route, assets and both portability hosts. |
 
 ## Live routes
 
 - Swarmfall: <https://luciusl00.github.io/>
-- Portability host: <https://luciusl00.github.io/portability>
-- Open-source 2048 host: <https://luciusl00.github.io/portability-2048>
+- Primary open-source portability proof: <https://luciusl00.github.io/portability-2048>
+- Developer boundary smoke test: <https://luciusl00.github.io/portability>
 
 ## Architecture boundary
 
@@ -102,14 +102,17 @@ These are development-team observations, not a controlled benchmark or formal us
 | Occupied global gesture returns the conflicting action to touch | Passed |
 | Camera denial/failure leaves touch available | Observed; persistence across a later reload was not separately reverified |
 | Landscape layout exposes game controls and restart | Passed |
-| Default camera rate on the manually tested phone | Visible lag observed |
-| Automatic camera-rate selection on that phone | No visible lag observed afterward |
+| Redmi Note 11 Pro before automatic camera-rate selection | Visible lag observed |
+| Redmi Note 11 Pro automatic camera-rate selection | Selected 10 FPS; smooth afterward |
+| Lenovo Legion 5 automatic camera-rate selection | Selected 15 FPS; smooth during testing |
 | Steep camera angle | Recognition degraded at roughly 30° tilt in manual testing |
 | 2048 touch direction through `MOVE_TILES` | Passed in a production browser build; accepted telemetry incremented and the board changed |
 | 2048 camera denial fallback | Passed in a production browser build; binding returned to touch and the game remained playable |
 
-The phone model, OS and browser were not recorded. A formal phone/laptop performance benchmark was
-explicitly deferred because of the submission deadline. The FPS observation above must not be
+The device models were recorded, but their OS and browser versions were not. The different 10 FPS
+and 15 FPS selections are limited development-team evidence that the test makes a per-device
+choice instead of always applying the lowest rate. A formal phone/laptop performance benchmark was
+explicitly deferred because of the submission deadline, so these observations must not be
 generalized to other devices.
 
 ## Current limitations

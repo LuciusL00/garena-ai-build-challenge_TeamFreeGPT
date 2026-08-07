@@ -51,14 +51,17 @@ accessibility or adoption claims.
 ## Live experience
 
 - [Play Swarmfall](https://luciusl00.github.io/)
-- [Open the independent portability host](https://luciusl00.github.io/portability)
-- [Try the open-source 2048 portability host](https://luciusl00.github.io/portability-2048)
+- [Try the open-source 2048 portability proof](https://luciusl00.github.io/portability-2048)
 
-The small Pulse host proves that a typed action can be registered without importing Swarmfall.
-The 2048 host goes one step further: it keeps a pinned MIT-licensed game's grid, movement and
-rendering logic unchanged, then connects touch and hand direction through one semantic
-`MOVE_TILES` adapter. The project does not claim authorship of 2048; its source and licence are
-preserved under `public/2048/`.
+The 2048 host is the primary portability proof. Its pinned upstream grid, tile, game-manager and
+HTML-actuator files are unchanged; the original input manager and bootstrap are excluded and a
+small host adapter connects touch and hand direction through one semantic `MOVE_TILES` action.
+The project does not claim authorship of 2048; its source and licence are preserved under
+`public/2048/`.
+
+The [Pulse host](https://luciusl00.github.io/portability) remains available as a minimal developer
+smoke test for registering one typed action without importing Swarmfall. It is not the primary
+demonstration.
 
 Swarmfall is the reference host, not the product. Its six remappable actions are:
 
@@ -193,7 +196,8 @@ Shipped:
 - In-game gesture mirror with hand landmarks and mapped-action feedback
 - Camera failure fallback to touch
 - Responsive mobile portrait and landscape gameplay
-- Independent Pulse and open-source 2048 portability hosts with no Swarmfall imports
+- Open-source 2048 portability proof plus a minimal Pulse boundary smoke test, both without
+  Swarmfall imports
 
 Deferred:
 
