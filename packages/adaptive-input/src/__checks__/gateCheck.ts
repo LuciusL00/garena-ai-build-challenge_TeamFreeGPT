@@ -257,7 +257,6 @@ async function main(): Promise<void> {
         latencyMs: 200,
         source: InputSourceId.TOUCH_BUTTON,
         outcome: 'success',
-        extraActivations: 0,
       },
       {
         trialIndex: 1,
@@ -268,7 +267,6 @@ async function main(): Promise<void> {
         latencyMs: 400,
         source: InputSourceId.TOUCH_BUTTON,
         outcome: 'success',
-        extraActivations: 0,
       },
       {
         trialIndex: 2,
@@ -279,7 +277,6 @@ async function main(): Promise<void> {
         latencyMs: null,
         source: null,
         outcome: 'miss',
-        extraActivations: 0,
       },
       {
         trialIndex: 3,
@@ -290,7 +287,6 @@ async function main(): Promise<void> {
         latencyMs: null,
         source: null,
         outcome: 'miss',
-        extraActivations: 0,
       },
     ],
     falseActivations: [
@@ -317,7 +313,6 @@ async function main(): Promise<void> {
       source: InputSourceId.HAND_CLOSED_FIST,
       confidence: 0.95,
       outcome: 'success' as const,
-      extraActivations: 0,
     })),
     falseActivations: [],
   };

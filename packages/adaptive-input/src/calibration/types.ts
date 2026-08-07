@@ -20,8 +20,6 @@ export interface CalibrationTrial<A extends ActionId = ActionId> {
   source: InputSourceId | null;
   confidence?: number;
   outcome: TrialOutcome;
-  /** Additional activations after the first response; catches held-gesture refires. */
-  extraActivations: number;
 }
 
 export interface FalseActivation<A extends ActionId = ActionId> {

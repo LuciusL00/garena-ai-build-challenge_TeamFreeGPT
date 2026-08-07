@@ -188,7 +188,6 @@ export class CalibrationHarness {
           source: signal.source,
           confidence: signal.confidence,
           outcome: latencyMs < ANTICIPATION_FLOOR_MS ? 'anticipated' : 'success',
-          extraActivations: 0,
         });
       };
 
@@ -219,7 +218,6 @@ export class CalibrationHarness {
             latencyMs: null,
             source: null,
             outcome: 'miss',
-            extraActivations: 0,
           });
         }, config.responseTimeoutMs);
         callbacks.onCue?.(trialIndex, cueAt);

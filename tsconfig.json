@@ -6,6 +6,7 @@
     "jsx": "preserve",
     "strict": true,
     "skipLibCheck": true,
+    "types": ["vite/client"],
     "paths": {
       "@adaptive-input": ["./packages/adaptive-input/src/index.ts"]
     },

@@ -105,6 +105,7 @@ export default function PortabilityClient() {
 
   const attemptTouch = (): void => {
     adaptiveRef.current?.emit('ACTIVATE', {}, {
+      kind: 'trigger',
       source: InputSourceId.TOUCH_BUTTON,
       timestamp: performance.now(),
       phase: 'gameplay',

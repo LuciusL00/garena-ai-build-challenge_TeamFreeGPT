@@ -9,6 +9,7 @@ current Adaptive Input Layer and Swarmfall reference deployment.
 |---|---:|---|---|
 | MediaPipe Tasks Vision | 0.10.35 | Apache-2.0 | In-browser hand gesture recognition and hand landmarks |
 | React / React DOM | 19.2.6 | MIT | Web application and calibration interface |
+| React / React DOM type declarations | 19.2.0 | MIT | Development-only strict TypeScript declarations |
 | React Server DOM Webpack | 19.2.6 | MIT | Vinext server-rendered build runtime |
 | Vinext | 1.0.0-beta.4 | MIT | Vite-based Pages Router build and server bundle |
 | Vite | 8.1.1 | MIT | Build tooling and development server |

@@ -2,9 +2,16 @@ node_modules/
 dist/
 build/
 .vite/
+.vinext/
 .next/
 next-env.d.ts
 .wrangler/
+
+# local agent worktrees and deployment bundles
+.agent-worktrees/
+.local-worktrees/
+.sites-deploy-*.tar
+.openai/*.png
 
 # environment / secrets — never commit these
 .env

@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:adaptive": "tsc -p packages/adaptive-input/tsconfig.json && node --experimental-transform-types packages/adaptive-input/src/__checks__/gateCheck.ts",
-    "build": "npm run check:adaptive && vinext build && node scripts/prepare-sites.mjs",
+    "build": "npm run typecheck && npm run check:adaptive && vinext build && node scripts/prepare-sites.mjs",
     "dev": "vinext dev",
     "start": "vinext start"
   },
@@ -18,6 +19,8 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.50.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.1.4",
     "@vitejs/plugin-rsc": "^0.5.26",
     "typescript": "~6.0.2",
