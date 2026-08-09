@@ -844,7 +844,7 @@ export default function CalibrationClient() {
           <article className="lab-panel test-panel">
           <div className="panel-title">
             <h2>{selection.task === 'TRIGGER' ? 'Activation test' : 'Direction test'}</h2>
-            <span>{progress}</span>
+            <span>{tuningMode === 'GESTURE_HOLD' ? '' : progress}</span>
           </div>
           {tuningSource && (
             <article className="tuning-card response-tuning">
